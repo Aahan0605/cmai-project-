@@ -61,16 +61,19 @@ def extract_visual(
         "face_margin": cfg.face_margin,
         "face_size": cfg.face_size,
     }
-    writers = {extractor.name: (extractor, FeatureCacheWriter(out_dir / extractor.name, cfg.shard_rows))}
-    if frequency is not None:
-        writers[frequency.name] = (frequency, FeatureCacheWriter(out_dir / frequency.name, cfg.shard_rows))
+    writers = {}
+    for ext in [extractor] + ([frequency] if frequency is not None else []):
+        writers[ext.name] = (ext, FeatureCacheWriter(out_dir / ext.name, cfg.shard_rows))
     stats = {"videos": 0, "skipped_no_face": 0, "frames": 0, "frames_no_face": 0}
     rows = read_manifest(manifest)
     for n, row in enumerate(rows):
         indices, frames = read_frames(video_root / row.path, cfg.frames_per_video)
         boxes = detector.detect(frames) if frames else []
-        kept = [(i, crop_face(f, b, cfg.face_margin, cfg.face_size))
-                for i, f, b in zip(indices, frames, boxes, strict=True) if b is not None]
+        kept = [
+            (i, crop_face(f, b, cfg.face_margin, cfg.face_size))
+            for i, f, b in zip(indices, frames, boxes, strict=True)
+            if b is not None
+        ]
         stats["frames_no_face"] += len(frames) - len(kept)
         if not kept:
             stats["skipped_no_face"] += 1
@@ -105,5 +108,6 @@ def extract_audio(
         wav = load_audio(video_root / row.path, cfg.audio_sample_rate)
         writer.add(row.video_id, row.label, [0], extractor([wav]))
     stats = {"videos": len(rows)}
-    writer.close(_meta(manifest, extractor.name, cfg, sample_rate=cfg.audio_sample_rate, stats=stats))
+    meta = _meta(manifest, extractor.name, cfg, sample_rate=cfg.audio_sample_rate, stats=stats)
+    writer.close(meta)
     return stats

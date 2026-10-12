@@ -46,8 +46,23 @@ def read_sampled_frames(path: Path, k: int) -> tuple[list[int], list[np.ndarray]
 def load_audio(path: Path, sample_rate: int) -> np.ndarray:
     """Mono float32 waveform in [-1, 1] at `sample_rate`, decoded by ffmpeg."""
     out = subprocess.run(
-        ["ffmpeg", "-v", "error", "-i", str(path), "-vn", "-ac", "1", "-ar", str(sample_rate),
-         "-f", "wav", "-acodec", "pcm_s16le", "-"],
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-i",
+            str(path),
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            str(sample_rate),
+            "-f",
+            "wav",
+            "-acodec",
+            "pcm_s16le",
+            "-",
+        ],
         capture_output=True,
         check=True,
     ).stdout

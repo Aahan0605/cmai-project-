@@ -1,0 +1,13 @@
+optimizer,quadratic_k10,quadratic_k100,quadratic_k1000,rosenbrock,rastrigin
+sgd,0.1,0.01,0.001,0.001,0.0003
+sgd_momentum,0.01,0.03,0.003,0.001,0.0001
+nag,0.1,0.01,0.001,0.001,0.0001
+rmsprop,0.03,0.0001,0.0001,0.0003,0.1
+adam,0.1,0.1,0.1,1,0.0003
+adamw,0.1,0.1,0.1,1,0.0003
+radam,0.3,0.03,0.003,0.003,0.001
+adabelief,0.03,0.1,0.1,1,0.1
+lion,0.0001,0.0001,0.0001,0.0003,0.0001
+sam_sgd_momentum,0.001,0.0001,0.0001,0.0001,0.003
+newton,fixed,fixed,fixed,fixed,
+lbfgs,1,1,1,1,

@@ -42,10 +42,15 @@ class FrequencyExtractor:
         out = np.empty((len(batch), self.bins), dtype=np.float32)
         for i, rgb in enumerate(batch):
             gray = rgb.astype(np.float32) @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
-            gray = F.interpolate(
-                torch.from_numpy(gray)[None, None], size=(self.size, self.size),
-                mode="bilinear", antialias=True,
-            )[0, 0].numpy() / 255.0
+            gray = (
+                F.interpolate(
+                    torch.from_numpy(gray)[None, None],
+                    size=(self.size, self.size),
+                    mode="bilinear",
+                    antialias=True,
+                )[0, 0].numpy()
+                / 255.0
+            )
             power = np.abs(np.fft.fftshift(np.fft.fft2(gray))) ** 2
             mask = self.band >= 0
             sums = np.bincount(self.band[mask], weights=power[mask], minlength=self.bins)

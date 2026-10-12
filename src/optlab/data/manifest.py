@@ -40,14 +40,22 @@ def parse_faceforensics(root: Path, compression: str, methods: list[str]) -> lis
     manipulated_sequences/<Method>/<c>/videos/TTT_SSS.mp4 (target_source)."""
     rows = [
         VideoRow(f"real/{p.stem}", p.relative_to(root).as_posix(), 0, "real", p.stem)
-        for p in sorted((root / "original_sequences/youtube" / compression / "videos").glob("*.mp4"))
+        for p in sorted(
+            (root / "original_sequences/youtube" / compression / "videos").glob("*.mp4")
+        )
     ]
     for method in methods:
-        for p in sorted((root / "manipulated_sequences" / method / compression / "videos").glob("*.mp4")):
+        videos = root / "manipulated_sequences" / method / compression / "videos"
+        for p in sorted(videos.glob("*.mp4")):
             target, source = p.stem.split("_")
             rows.append(
-                VideoRow(f"{method}/{p.stem}", p.relative_to(root).as_posix(), 1, method,
-                         f"{target}+{source}")
+                VideoRow(
+                    f"{method}/{p.stem}",
+                    p.relative_to(root).as_posix(),
+                    1,
+                    method,
+                    f"{target}+{source}",
+                )
             )
     if not rows:
         raise FileNotFoundError(f"no FaceForensics++ videos found under {root}")
@@ -68,7 +76,8 @@ def parse_celeb_df(root: Path) -> list[VideoRow]:
         folder, stem = rel.split("/")[0], Path(rel).stem
         if folder == "Celeb-synthesis":
             target, source, _ = stem.split("_")
-            rows.append(VideoRow(f"fake/{stem}", rel, 1, "celeb_synthesis", f"{target}+{source}", "test"))
+            identities = f"{target}+{source}"
+            rows.append(VideoRow(f"fake/{stem}", rel, 1, "celeb_synthesis", identities, "test"))
         elif folder == "Celeb-real":
             rows.append(VideoRow(f"real/{stem}", rel, 0, "real", stem.split("_")[0], "test"))
         elif folder == "YouTube-real":
@@ -101,7 +110,9 @@ def identity_components(rows: list[VideoRow]) -> list[list[int]]:
     return sorted(groups.values())
 
 
-def _assign(components: list[list[int]], targets: dict[str, float], rng: random.Random) -> dict[int, str]:
+def _assign(
+    components: list[list[int]], targets: dict[str, float], rng: random.Random
+) -> dict[int, str]:
     """Shuffle components, then give each to the split furthest below its target share."""
     order = components[:]
     rng.shuffle(order)

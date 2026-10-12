@@ -33,7 +33,8 @@ class FeatureDataset(Dataset[Item]):
         val_role: str | None = None,
     ) -> None:
         rows = [
-            r for r in read_manifest(manifest)
+            r
+            for r in read_manifest(manifest)
             if r.split == split and (val_role is None or r.val_role == val_role)
         ]
         labels = {r.video_id: r.label for r in rows}
@@ -50,7 +51,9 @@ class FeatureDataset(Dataset[Item]):
         if self.freq_row is not None:
             missing = [(v, f) for v, f, _ in self.items if (v, f) not in self.freq_row]
             if missing:
-                raise ValueError(f"{len(missing)} frames lack frequency features, e.g. {missing[0]}")
+                raise ValueError(
+                    f"{len(missing)} frames lack frequency features, e.g. {missing[0]}"
+                )
 
     def __len__(self) -> int:
         return len(self.items)
@@ -81,5 +84,6 @@ def balanced_sampler(dataset: FeatureDataset, generator: torch.Generator) -> Wei
     """Each class drawn with equal probability (FF++ has several fakes per real)."""
     counts = Counter(dataset.labels)
     weights = torch.tensor([1.0 / counts[y] for y in dataset.labels], dtype=torch.float64)
-    return WeightedRandomSampler(weights, num_samples=len(weights), replacement=True,
-                                 generator=generator)
+    return WeightedRandomSampler(
+        weights, num_samples=len(weights), replacement=True, generator=generator
+    )
