@@ -110,7 +110,7 @@ Primary configuration is **late fusion**:
 | Gradient clipping | off in baselines; `clip_norm` configurable; one ablation at 1.0 |
 | Seeds | 0–4 (5); 0–9 recommended because heads are cheap |
 | Seed controls | Parameter init and data order. Splits are **not** reseeded. |
-| Determinism | Seed `random`, `numpy`, `torch`; enable deterministic algorithms where available; record library versions in `runs` |
+| Determinism | Seed `random`, `numpy`, `torch`; enable deterministic algorithms where available; record library versions in `runs.library_versions_json` (migration 002) |
 | Logged per epoch | `train_loss, val_loss, val_auc, lr, grad_norm, step_time_sec` → `run_epochs` |
 | Divergence | NaN/Inf loss → `runs.status = 'diverged'`, kept in the DB |
 | Resumability | A run key is `(experiment, optimizer, model_config, seed)`. Re-running a `completed` key is a no-op. |
@@ -237,7 +237,7 @@ Runner: fixed start points per seed, `max_steps` per benchmark, tolerance on `|f
 
 ## 11. Database layer
 
-- `backend/schema.sql` is applied by `optlab init-db`; `PRAGMA user_version` tracks the schema version. Migrations are numbered SQL files under `src/optlab/db/migrations/`.
+- `backend/schema.sql` is applied by `optlab init-db`; `PRAGMA user_version` tracks the schema version. Migrations are numbered SQL files under `src/optlab/db/migrations/` (`NNN_name.sql`; applied in order when NNN > user_version, which is then set to NNN). `schema.sql` stays at v1; `002_runs_library_versions.sql` adds `runs.library_versions_json` (v2).
 - Writers use parameterized statements only. The API opens the file read-only (`file:results.db?mode=ro`, `uri=True`).
 - Standard deviation is computed in Python from the `auc_var` and `eer_var` columns of `v_leaderboard`.
 - `optlab merge-db a.db b.db --out merged.db` merges partial databases from separate Colab/Kaggle sessions using the `UNIQUE` keys; conflicting finished runs raise an error rather than overwrite.

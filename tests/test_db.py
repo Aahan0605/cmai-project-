@@ -9,6 +9,7 @@ from optlab.db.connection import connect, init_schema
 from optlab.db.merge import MergeConflict, merge_databases
 from optlab.db.repository import (
     TestSplitAlreadyWritten,
+    columns,
     id_of,
     insert,
     seed_catalogues,
@@ -45,6 +46,7 @@ def add_run(conn: sqlite3.Connection, seed: int, optimizer: str = "adamw", **kw)
         "max_epochs": 30,
         "best_epoch": 7,
         "finished_at": "2026-10-12 10:00:00",
+        "library_versions_json": '{"torch": "2.14.1"}',
     }
     row.update(kw)
     return insert(conn, "runs", row)
@@ -70,8 +72,17 @@ def conn(root: Path, tmp_path: Path) -> sqlite3.Connection:
 def test_init_is_idempotent(root: Path, tmp_path: Path) -> None:
     make_db(root, tmp_path / "r.db").close()
     c = make_db(root, tmp_path / "r.db")
-    assert c.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert c.execute("PRAGMA user_version").fetchone()[0] == 2
     assert c.execute("SELECT COUNT(*) FROM optimizers").fetchone()[0] == 12
+
+
+def test_migration_upgrades_v1_database(root: Path, tmp_path: Path) -> None:
+    conn = connect(tmp_path / "v1.db")
+    conn.executescript((root / "backend" / "schema.sql").read_text())  # a pre-migration DB
+    assert "library_versions_json" not in columns(conn, "runs")
+    assert init_schema(conn, root / "backend" / "schema.sql") == 2
+    assert "library_versions_json" in columns(conn, "runs")
+    assert init_schema(conn, root / "backend" / "schema.sql") == 2  # re-run is a no-op
 
 
 @pytest.mark.parametrize(
