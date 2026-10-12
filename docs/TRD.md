@@ -33,11 +33,11 @@ cmai-project-/
 ├── Makefile
 ├── pyproject.toml
 ├── configs/
-│   ├── data/                 # dataset + extraction configs
+│   ├── data/                 # datasets/*.yaml catalogue, splits.yaml, extraction.yaml
 │   ├── model/                # model_configs rows as YAML
 │   ├── optim/                # per-optimizer search spaces
 │   └── experiments/          # toy.yaml, baseline_v1.yaml, hybrid_v1.yaml, ablation_*.yaml
-├── manifests/                # committed split CSVs (video_id, label, identity_id, split, val_role)
+├── manifests/                # committed split CSVs (video_id, path, label, method, identity_id, split, val_role)
 ├── src/optlab/
 │   ├── cli.py
 │   ├── config.py             # Pydantic config models
@@ -78,11 +78,11 @@ Never commit raw videos, frames or face crops. Respect each dataset's terms.
 
 ### 3.2 Steps
 
-1. **Manifests.** Build identity-disjoint train/val/test splits with a fixed split seed. The `val` split carries a `val_role` column: `tune` (checkpoint and hyperparameter selection) and `fusion` (fitting fusion weights). Commit CSVs under `manifests/`.
+1. **Manifests.** Build identity-disjoint train/val/test splits with a fixed split seed (`configs/data/splits.yaml`). Videos that share any identity (a face swap has a target and a source) form one connected component, and whole components are assigned to a split; `prepare` refuses if one component holds more than half the videos. Label convention: 1 = fake, 0 = real. Celeb-DF v2 rows come from its official test list and are all `test`. The `val` split carries a `val_role` column: `tune` (checkpoint and hyperparameter selection) and `fusion` (fitting fusion weights). Commit CSVs under `manifests/`.
 2. **Face crop.** Detect, expand the box by a fixed margin, resize to the backbone's input size.
 3. **Frame sampling.** K = 16 frames per video, uniform in time (configurable).
 4. **Feature extraction (the only expensive step).** Run frozen backbones once and cache. Visual: one embedding per frame. Audio: one embedding per video. Frequency: one vector per frame.
-5. **Cache format.** Per `{dataset}/{backbone}`: float16 `.npy` shards plus an index CSV (`video_id, label, frame_idx, row`). Loaded with memmap and cast to float32 per batch.
+5. **Cache format.** Per `{dataset}/{backbone}`: float16 `.npy` shards plus an index CSV (`video_id, label, frame_idx, row`) and a `meta.json` (backbone, preprocessing parameters, manifest SHA-256, frame/video counts including frames and videos with no detected face). Loaded with memmap and cast to float32 per batch. Frames with no detected face are dropped; the frequency stream is computed from the same crops as the visual stream.
 
 ### 3.3 `FeatureDataset`
 
@@ -120,14 +120,12 @@ Primary configuration is **late fusion**:
 ### 6.1 Interface
 
 ```python
-class OptimizerSpec(Protocol):
-    name: str
-    family: Literal["plain","momentum","adaptive","sign","sharpness_aware","second_order","hybrid"]
-    def build(self, params: Iterable[Tensor], hparams: Mapping[str, float]) -> torch.optim.Optimizer: ...
-    search_space: Mapping[str, SpaceDim]    # shared with the tuner
+BUILDERS: dict[str, Callable[..., torch.optim.Optimizer]]          # optlab.optim.registry
+def build_optimizer(name: str, params, hparams: Mapping[str, Any]) -> torch.optim.Optimizer
+def build_from_config(cfg: OptimizerConfig, params, tuned: Mapping[str, Any]) -> torch.optim.Optimizer
 ```
 
-The registry maps `name → OptimizerSpec` and mirrors the `optimizers` table. SAM and any hybrid that needs a second forward/backward expose `step(closure)`; the trainer always calls `optimizer.step(closure)` so every optimizer shares one code path.
+`OptimizerConfig` (one YAML per optimizer under `configs/optim/`) carries `family`, the `fixed` hyperparameters (momentum, betas, eps) and the tuned `search_space` (shared with the tuner); `build_from_config` merges fixed and tuned values. Builders take hyperparameters as keyword arguments, so a misspelled key raises instead of being ignored. The YAML catalogue is what `init-db` writes to the `optimizers` table. Newton is toy-only and lives in the toy runner. SAM and any hybrid that needs a second forward/backward expose `step(closure)`; the trainer always calls `optimizer.step(closure)` so every optimizer shares one code path.
 
 ### 6.2 Update rules
 
@@ -235,7 +233,7 @@ Soft-margin SVM on concatenated features, solved through the dual (`cvxpy` or `s
 | Rastrigin | 2–10 | no | Many local minima; PSO/GA comparison |
 | Himmelblau (optional) | 2 | no | Multiple global minima |
 
-Runner: fixed start points per seed, `max_steps` per benchmark, tolerance on `|f − f*|`. Writes `toy_runs` (steps to tolerance, final value, final gradient norm), `toy_run_curves`, and a `.npz` trajectory for the 2-D viewer. The toy suite must run on CPU in minutes.
+Runner: fixed start points per seed, `max_steps` per benchmark, tolerance on `|f − f*|`. Each condition number of the quadratic is its own `toy_benchmarks` row (`quadratic_k10`, `quadratic_k100`, `quadratic_k1000`), with a fixed random eigenbasis so diagonal preconditioners get no axis alignment for free. Learning rate: for each (benchmark, optimizer) the value from `lr_grid` that reaches tolerance in the fewest steps on the tuning seed (then lowest final f), reused for every seed; weight decay is 0 and other hyperparameters stay at their `fixed` values (SAM uses ρ = 0.05). One step is one `optimizer.step()`; for L-BFGS that is one outer iteration (`max_iter=1`, `max_eval=25`, strong-Wolfe line search whose evaluations are not counted). Diverged runs (non-finite or |f| above a threshold) are stored with NULL `final_f`. Writes `toy_runs` (steps to tolerance, final value, final gradient norm), `toy_run_curves`, and a `.npz` trajectory for the 2-D viewer. The toy suite must run on CPU in minutes.
 
 ## 11. Database layer
 
@@ -299,9 +297,10 @@ Errors: `404` for unknown ids, `422` for bad parameters, JSON body `{ "detail": 
 
 ```
 optlab init-db                                   # apply schema.sql, seed catalogues from configs
-optlab prepare   --dataset ff++ --out manifests/ # splits
-optlab extract   --dataset ff++ --backbone clip_vit_b16
-optlab toy       --benchmarks all --optimizers all --seeds 0-4
+optlab prepare   --dataset ff++ --root DATA/FF++ --out manifests/  # splits
+optlab extract   --dataset ff++ --backbone clip_vit_b16 --root DATA/FF++
+optlab toy       [--benchmarks ...] [--optimizers ...] [--force]  # seeds etc. from configs/experiments/toy.yaml
+optlab toy-report --out results/toy --summary results/toy_summary.md
 optlab tune      --experiment baseline_v1 --optimizer adamw --method random --trials 20
 optlab train     --experiment baseline_v1 --optimizer adamw --seed 0
 optlab fuse      --run-id 12
@@ -351,7 +350,7 @@ seeds: [0, 1, 2, 3, 4]
 
 - Every run stores config path, git commit, seed, and library versions.
 - Toy suite reproducible with `make toy` on CPU.
-- Feature extraction records backbone id, preprocessing parameters and manifest hash in an `artifacts` row of kind `feature_cache`.
+- Feature extraction records backbone id, preprocessing parameters and manifest hash in the cache's `meta.json`. (An `artifacts` row of kind `feature_cache` is not possible under schema v1: `artifacts` requires a `run_id` or `toy_run_id`. Revisit with a migration if the DB needs to reference caches.)
 - The README lists exact commands, expected runtimes and the dataset-access steps.
 
 ## 17. Compute planning

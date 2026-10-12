@@ -67,6 +67,23 @@ class DatasetConfig(_Strict):
     has_audio: bool = False
     compression: str | None = None
     access_notes: str | None = None
+    methods: list[str] | None = None  # FF++ manipulation folders to include
+
+
+class SplitConfig(_Strict):
+    """Identity-disjoint split fractions (by video count). Splits are never reseeded per run."""
+
+    seed: int = 0
+    train: float = 0.7
+    val: float = 0.15
+    test: float = 0.15
+    val_fusion_fraction: float = Field(0.5, ge=0.0, le=1.0)  # share of val used to fit fusion
+
+    @model_validator(mode="after")
+    def _check(self) -> SplitConfig:
+        if abs(self.train + self.val + self.test - 1.0) > 1e-9:
+            raise ValueError("train + val + test must sum to 1")
+        return self
 
 
 class ExtractionConfig(_Strict):
@@ -147,6 +164,10 @@ def load_models(configs_dir: str | Path) -> dict[str, ModelConfig]:
 
 def load_datasets(configs_dir: str | Path) -> dict[str, DatasetConfig]:
     return load_dir(Path(configs_dir) / "data" / "datasets", DatasetConfig)
+
+
+def load_splits(configs_dir: str | Path) -> SplitConfig:
+    return SplitConfig.model_validate(_load(Path(configs_dir) / "data" / "splits.yaml"))
 
 
 def load_extraction(configs_dir: str | Path) -> ExtractionConfig:
