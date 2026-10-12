@@ -9,11 +9,11 @@ dist/
 build/
 
 # Data and heavy outputs (never commit datasets, frames, faces or features)
-data/
-features/
+/data/
+/features/
 artifacts/*
 !artifacts/.gitkeep
-checkpoints/
+/checkpoints/
 *.pt
 *.ckpt
 *.npy

@@ -1,0 +1,5 @@
+name: faceforensics_pp
+has_audio: false
+compression: c23
+access_notes: "Access request form on the FaceForensics++ GitHub page. Not yet granted."
+methods: [Deepfakes, Face2Face, FaceSwap, NeuralTextures]

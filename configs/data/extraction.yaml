@@ -1,0 +1,12 @@
+frames_per_video: 16
+face_margin: 0.3
+face_size: 224
+face_detector: mtcnn
+visual_backbones:
+  clip_vit_b16: {arch: ViT-B-16, pretrained: openai}
+audio_backbones:
+  wav2vec2_base: {hf_id: facebook/wav2vec2-base}
+audio_sample_rate: 16000
+freq_size: 128
+freq_bins: 64
+shard_rows: 65536

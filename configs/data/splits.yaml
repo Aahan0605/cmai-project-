@@ -1,0 +1,6 @@
+# Identity-disjoint split of FaceForensics++ (Celeb-DF v2 is test-only, from its official list).
+seed: 0
+train: 0.7
+val: 0.15
+test: 0.15
+val_fusion_fraction: 0.5
