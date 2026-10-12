@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Data and heavy outputs (never commit datasets, frames, faces or features)
+data/
+features/
+artifacts/*
+!artifacts/.gitkeep
+checkpoints/
+*.pt
+*.ckpt
+*.npy
+*.npz
+
+# Results databases are regenerated or attached to releases
+*.db
+*.db-journal
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/
+
+# Frontend
+node_modules/

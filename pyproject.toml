@@ -1,0 +1,62 @@
+[project]
+name = "optlab"
+version = "0.1.0"
+description = "Optimizer comparison and hybrid optimizer design for multimodal deepfake detection"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Aahan Gajera" }]
+requires-python = ">=3.11"
+dependencies = [
+    "torch>=2.2",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "scikit-learn>=1.4",
+    "pydantic>=2.6",
+    "pyyaml>=6.0",
+    "matplotlib>=3.8",
+    "lion-pytorch>=0.2",
+    "adabelief-pytorch>=0.2.1",
+]
+
+[project.optional-dependencies]
+# Heavy, GPU-oriented feature extraction. Not needed for tests, CI or the toy suite.
+extract = [
+    "opencv-python-headless>=4.9",
+    "facenet-pytorch>=2.5",
+    "open_clip_torch>=2.24",
+    "transformers>=4.40",
+]
+
+[project.scripts]
+optlab = "optlab.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.5"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/optlab"]
+
+# CPU-only torch wheels on Linux (CI); macOS wheels are CPU/MPS already.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
