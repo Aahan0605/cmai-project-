@@ -7,6 +7,8 @@ values are merged by `build_from_config`. Newton is toy-only and lives in `optla
 
 from __future__ import annotations
 
+import contextlib
+import io
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -41,16 +43,17 @@ def _adabelief(
     weight_decouple: bool = True,
     rectify: bool = False,
 ) -> Optimizer:
-    return AdaBelief(
-        params,
-        lr=lr,
-        betas=tuple(betas),
-        eps=eps,
-        weight_decay=weight_decay,
-        weight_decouple=weight_decouple,
-        rectify=rectify,
-        print_change_log=False,
-    )
+    with contextlib.redirect_stdout(io.StringIO()):  # the package prints a banner per instance
+        return AdaBelief(
+            params,
+            lr=lr,
+            betas=tuple(betas),
+            eps=eps,
+            weight_decay=weight_decay,
+            weight_decouple=weight_decouple,
+            rectify=rectify,
+            print_change_log=False,
+        )
 
 
 def _with_tuple_betas(cls: type[Optimizer]) -> Builder:

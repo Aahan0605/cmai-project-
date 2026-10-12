@@ -17,4 +17,4 @@ lint:
 toy:
 	$(OPTLAB) init-db --db $(DB)
 	$(OPTLAB) toy --db $(DB) --config configs/experiments/toy.yaml --force
-	$(OPTLAB) toy-report --db $(DB) --out results/toy
+	$(OPTLAB) toy-report --db $(DB) --out results/toy --summary results/toy_summary.md
