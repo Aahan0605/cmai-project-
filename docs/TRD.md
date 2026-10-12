@@ -62,7 +62,7 @@ cmai-project-/
 └── docs/                     # PRD, TRD, UIUX, ARCHITECTURE, report
 ```
 
-`artifacts/`, raw data, feature caches and large checkpoints are git-ignored. `results/results.db` is committed only if small; otherwise attached to a GitHub release and fetched by `make fetch-results`.
+Folders for later phases (`models/`, `train/`, `tune/`, `fusion/`, `eval/`, `export/`, `backend/api/`, `frontend/`, `notebooks/`) are created when their phase starts. `artifacts/`, raw data, feature caches and large checkpoints are git-ignored. `results/results.db` is committed only if small; otherwise attached to a GitHub release and fetched by `make fetch-results`.
 
 ## 3. Data pipeline
 
