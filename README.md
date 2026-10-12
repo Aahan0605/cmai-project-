@@ -9,5 +9,11 @@ See `docs/PRD.md` for the research question and `docs/TRD.md` for the technical 
 ```bash
 make setup   # uv sync (Python 3.11)
 make test    # pytest on CPU
-make toy     # toy benchmark suite -> results/toy/
+make toy     # toy benchmark suite -> results/toy_summary.md, results/toy/
 ```
+
+`make toy` took 349 s on an Apple-silicon laptop CPU (measured 2026-10-12). Toy results:
+[results/toy_summary.md](results/toy_summary.md), generated from the results database.
+
+Feature extraction needs the optional extras (`uv sync --extra extract`) and local dataset
+copies; no dataset results exist yet.

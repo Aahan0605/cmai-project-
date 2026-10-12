@@ -170,9 +170,11 @@ def plot_benchmark(
     for ax, (o, path) in zip(axes.ravel(), trajs.items(), strict=False):
         if log_levels:
             levels = np.logspace(np.log10(max(z.min(), 1e-6)), np.log10(z.max()), 20)
-            ax.contour(gx, gy, np.maximum(z, 1e-6), levels=levels, norm=LogNorm(), cmap="Greys")
+            ax.contour(
+                gx, gy, np.maximum(z, 1e-6), levels=levels, norm=LogNorm(), cmap="Greys", alpha=0.35
+            )
         else:
-            ax.contour(gx, gy, z, levels=20, cmap="Greys")
+            ax.contour(gx, gy, z, levels=20, cmap="Greys", alpha=0.35)
         style = _style(o, first[o]["family"])
         if len(path):
             ax.plot(
