@@ -1,0 +1,9 @@
+name: rmsprop
+family: adaptive
+in_syllabus: true
+update_rule: "s <- rho s + (1-rho) g^2;  theta <- theta - lr g / (sqrt(s) + eps)"
+reference: "Tieleman & Hinton (2012), lecture 6.5"
+fixed: {alpha: 0.99, eps: 1.0e-8}
+search_space:
+  lr: {type: log_uniform, low: 1.0e-5, high: 1.0e-1}
+  weight_decay: {type: log_uniform, low: 1.0e-6, high: 1.0e-2, p_zero: 0.5}

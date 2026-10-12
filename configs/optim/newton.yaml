@@ -1,0 +1,5 @@
+name: newton
+family: second_order
+in_syllabus: true
+update_rule: "theta <- theta - H^-1 g  (toy benchmarks only)"
+reference: "Nocedal & Wright (2006), Numerical Optimization, ch. 3"

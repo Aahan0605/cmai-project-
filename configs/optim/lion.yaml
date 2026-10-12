@@ -1,0 +1,9 @@
+name: lion
+family: sign
+in_syllabus: false
+update_rule: "c = sign(b1 m + (1-b1) g);  theta <- theta - lr (c + wd theta);  m <- b2 m + (1-b2) g"
+reference: "Chen et al. (2023)"
+fixed: {betas: [0.9, 0.99]}
+search_space:
+  lr: {type: log_uniform, low: 1.0e-6, high: 1.0e-2}
+  weight_decay: {type: log_uniform, low: 1.0e-6, high: 1.0e-2, p_zero: 0.5}

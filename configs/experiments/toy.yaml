@@ -1,0 +1,41 @@
+name: toy_v1
+phase: toy
+description: >
+  Phase 1. Every optimizer on functions with known minima, deterministic full gradients,
+  no weight decay. The learning rate for each (benchmark, optimizer) is the value in lr_grid
+  that reaches tolerance in the fewest steps on tuning_seed (ties and misses broken by the
+  lowest final f); that value is then used for every seed.
+hypothesis: >
+  (1) On the quadratics, steps-to-tolerance of tuned plain GD grows roughly linearly with the
+  condition number and momentum/NAG roughly with its square root, so the gap widens as kappa
+  grows. (2) Newton reaches tolerance in one step on every quadratic; L-BFGS in a handful.
+  (3) Lion's fixed-size sign steps stall above tight tolerances unless the learning rate is
+  very small. (4) On Rastrigin no first-order optimizer reliably reaches the global minimum
+  from random starts; final values depend mostly on the start point.
+seeds: [0, 1, 2, 3, 4]
+tuning_seed: 0
+lr_grid: [1.0e-4, 3.0e-4, 1.0e-3, 3.0e-3, 1.0e-2, 3.0e-2, 1.0e-1, 3.0e-1, 1.0]
+optimizers: [sgd, sgd_momentum, nag, rmsprop, adam, adamw, radam, adabelief, lion, sam_sgd_momentum]
+reference_optimizers: [newton, lbfgs]
+hparam_overrides:
+  sam_sgd_momentum: {rho: 0.05}
+divergence_threshold: 1.0e12
+curve_dense_steps: 100
+curve_stride: 10
+trajectory_dir: artifacts/toy
+benchmarks:
+  - {name: quadratic_k10, kind: quadratic, dim: 2, condition_number: 10, max_steps: 20000,
+     tolerance: 1.0e-8, start_low: -1.0, start_high: 1.0, references: true,
+     description: "0.5 x^T A x, A = Q diag(logspace(1, kappa)) Q^T with a fixed random rotation Q"}
+  - {name: quadratic_k100, kind: quadratic, dim: 2, condition_number: 100, max_steps: 20000,
+     tolerance: 1.0e-8, start_low: -1.0, start_high: 1.0, references: true,
+     description: "0.5 x^T A x, A = Q diag(logspace(1, kappa)) Q^T with a fixed random rotation Q"}
+  - {name: quadratic_k1000, kind: quadratic, dim: 2, condition_number: 1000, max_steps: 20000,
+     tolerance: 1.0e-8, start_low: -1.0, start_high: 1.0, references: true,
+     description: "0.5 x^T A x, A = Q diag(logspace(1, kappa)) Q^T with a fixed random rotation Q"}
+  - {name: rosenbrock, kind: rosenbrock, dim: 2, max_steps: 20000, tolerance: 1.0e-6,
+     start_low: -2.0, start_high: 2.0, references: true,
+     description: "sum 100 (x_{i+1} - x_i^2)^2 + (1 - x_i)^2, minimum 0 at (1, ..., 1)"}
+  - {name: rastrigin, kind: rastrigin, dim: 2, max_steps: 5000, tolerance: 1.0e-6,
+     start_low: -5.12, start_high: 5.12,
+     description: "10 n + sum x_i^2 - 10 cos(2 pi x_i), minimum 0 at the origin, many local minima"}

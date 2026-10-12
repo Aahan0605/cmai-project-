@@ -1,0 +1,9 @@
+name: radam
+family: adaptive
+in_syllabus: false
+update_rule: "Adam with variance rectification of the adaptive learning rate (torch.optim.RAdam)"
+reference: "Liu et al. (2020)"
+fixed: {betas: [0.9, 0.999], eps: 1.0e-8}
+search_space:
+  lr: {type: log_uniform, low: 1.0e-5, high: 1.0e-1}
+  weight_decay: {type: log_uniform, low: 1.0e-6, high: 1.0e-2, p_zero: 0.5}

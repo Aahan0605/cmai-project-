@@ -1,0 +1,6 @@
+name: lbfgs
+family: second_order
+in_syllabus: true
+update_rule: "theta <- theta - lr H_k g, H_k from the last m (s, y) pairs; strong-Wolfe line search (torch.optim.LBFGS)"
+reference: "Liu & Nocedal (1989); Nocedal & Wright (2006), ch. 7"
+fixed: {lr: 1.0, history_size: 10, max_iter: 1, line_search_fn: strong_wolfe}

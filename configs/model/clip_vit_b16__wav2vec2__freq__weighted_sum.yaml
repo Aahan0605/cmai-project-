@@ -1,0 +1,6 @@
+# FakeAVCeleb (audio + video): visual, audio and frequency streams, late fusion on the simplex.
+name: clip_vit_b16__wav2vec2__freq__weighted_sum
+visual_backbone: clip_vit_b16
+audio_backbone: wav2vec2_base
+uses_frequency_branch: true
+fusion_type: weighted_sum

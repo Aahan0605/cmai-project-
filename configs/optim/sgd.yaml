@@ -1,0 +1,9 @@
+name: sgd
+family: plain
+in_syllabus: true
+update_rule: "theta <- theta - lr * g"
+reference: "Robbins & Monro (1951); mini-batch SGD"
+fixed: {}
+search_space:
+  lr: {type: log_uniform, low: 1.0e-4, high: 1.0}
+  weight_decay: {type: log_uniform, low: 1.0e-6, high: 1.0e-2, p_zero: 0.5}

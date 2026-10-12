@@ -1,0 +1,9 @@
+name: adam
+family: adaptive
+in_syllabus: true
+update_rule: "m <- b1 m + (1-b1) g;  v <- b2 v + (1-b2) g^2;  theta <- theta - lr mhat / (sqrt(vhat) + eps)"
+reference: "Kingma & Ba (2015)"
+fixed: {betas: [0.9, 0.999], eps: 1.0e-8}
+search_space:
+  lr: {type: log_uniform, low: 1.0e-5, high: 1.0e-1}
+  weight_decay: {type: log_uniform, low: 1.0e-6, high: 1.0e-2, p_zero: 0.5}

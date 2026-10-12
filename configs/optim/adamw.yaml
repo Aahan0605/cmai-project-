@@ -1,0 +1,9 @@
+name: adamw
+family: adaptive
+in_syllabus: false
+update_rule: "Adam step plus decoupled decay: theta <- theta - lr (mhat / (sqrt(vhat) + eps) + wd theta)"
+reference: "Loshchilov & Hutter (2019)"
+fixed: {betas: [0.9, 0.999], eps: 1.0e-8}
+search_space:
+  lr: {type: log_uniform, low: 1.0e-5, high: 1.0e-1}
+  weight_decay: {type: log_uniform, low: 1.0e-6, high: 1.0e-2, p_zero: 0.5}
