@@ -209,6 +209,57 @@ def plot_benchmark(
     return paths
 
 
+def plot_condition_scaling(
+    conn: sqlite3.Connection, optimizers: list[str], out_dir: Path
+) -> list[Path]:
+    """Median steps to tolerance vs condition number on the quadratics (log-log).
+
+    A point is drawn only where every seed reached tolerance, so medians never mix in misses.
+    """
+    rows = conn.execute(
+        "SELECT o.name AS optimizer, o.family, b.condition_number AS kappa,"
+        " COUNT(*) AS n, COUNT(r.steps_to_tol) AS reached"
+        " FROM toy_runs r JOIN toy_benchmarks b ON b.id = r.benchmark_id"
+        " JOIN optimizers o ON o.id = r.optimizer_id"
+        " WHERE b.condition_number IS NOT NULL GROUP BY o.id, b.id"
+    ).fetchall()
+    if len({r["kappa"] for r in rows}) < 2:
+        return []
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for o in optimizers:
+        pts = []
+        for r in rows:
+            if r["optimizer"] == o and r["reached"] == r["n"]:
+                steps = [
+                    s[0]
+                    for s in conn.execute(
+                        "SELECT r.steps_to_tol FROM toy_runs r"
+                        " JOIN toy_benchmarks b ON b.id = r.benchmark_id"
+                        " JOIN optimizers o ON o.id = r.optimizer_id"
+                        " WHERE o.name = ? AND b.condition_number = ?",
+                        (o, r["kappa"]),
+                    )
+                ]
+                pts.append((r["kappa"], max(median(steps), 1)))
+        if pts:
+            family = next(r["family"] for r in rows if r["optimizer"] == o)
+            k, steps = zip(*sorted(pts), strict=True)
+            ax.plot(k, steps, label=o, markersize=7, **_style(o, family))
+    ax.set(
+        xscale="log", yscale="log", xlabel="condition number κ", ylabel="median steps to tolerance"
+    )
+    ax.set_title(
+        "Ill-conditioned quadratics: cost of conditioning\n"
+        "(points only where every seed reached tolerance)"
+    )
+    ax.legend(fontsize=7, ncol=2)
+    fig.tight_layout()
+    path = out_dir / "quadratic_scaling.png"
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+    return [path]
+
+
 def write_report(
     conn: sqlite3.Connection, exp: ToyExperimentConfig, out_dir: Path, summary_path: Path
 ) -> None:
@@ -229,7 +280,7 @@ def write_report(
         with open(out_dir / f"{name}.csv", "w", newline="") as f:
             csv.writer(f).writerows(table)
 
-    plots: list[Path] = []
+    plots = plot_condition_scaling(conn, optimizers, out_dir)
     for b in benchmarks:
         by_opt = {}
         for o in optimizers:

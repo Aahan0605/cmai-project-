@@ -69,14 +69,17 @@ def test_suite_writes_db_and_report(root: Path, tmp_path: Path) -> None:
         optimizers=["sgd", "adam"],
         reference_optimizers=["newton"],
         trajectory_dir=str(tmp_path / "traj"),
-        benchmarks=[bench("quadratic", name="q", condition_number=10.0, references=True)],
+        benchmarks=[
+            bench("quadratic", name="q", condition_number=10.0, references=True),
+            bench("quadratic", name="q100", condition_number=100.0),
+        ],
     )
     optimizers = load_optimizers(root / "configs")
     conn = connect(tmp_path / "r.db")
     init_schema(conn, root / "backend" / "schema.sql")
     seed_catalogues(conn, optimizers.values(), [], [], exp.benchmarks)
     run_suite(conn, exp, optimizers, log=lambda _: None)
-    assert conn.execute("SELECT COUNT(*) FROM toy_runs").fetchone()[0] == 6
+    assert conn.execute("SELECT COUNT(*) FROM toy_runs").fetchone()[0] == 10
     assert conn.execute("SELECT COUNT(*) FROM toy_run_curves").fetchone()[0] > 6
     paths = [r[0] for r in conn.execute("SELECT trajectory_path FROM toy_runs")]
     assert all(Path(p).exists() for p in paths)
@@ -89,3 +92,4 @@ def test_suite_writes_db_and_report(root: Path, tmp_path: Path) -> None:
     summary = (tmp_path / "summary.md").read_text()
     assert "| newton | 1 [1–1] (2/2) |" in summary
     assert (tmp_path / "out" / "q_trajectories.png").exists()
+    assert (tmp_path / "out" / "quadratic_scaling.png").exists()
