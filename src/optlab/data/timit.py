@@ -68,8 +68,11 @@ def download(url: str, dest: Path, md5: str, size: int | None = None, retries: i
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists() and hashlib.md5(dest.read_bytes()).hexdigest() == md5:
         return  # already complete (a Range request past the end would fail)
-    for attempt in range(retries):
+    stalled = 0  # consecutive attempts that added no bytes; progress resets it
+    while True:
         have = dest.stat().st_size if dest.exists() else 0
+        if size is not None and have >= size:
+            break
         req = urllib.request.Request(url, headers={"Range": f"bytes={have}-"} if have else {})
         try:
             with (
@@ -79,12 +82,17 @@ def download(url: str, dest: Path, md5: str, size: int | None = None, retries: i
                 if have and r.status != 206:  # server ignored Range: start over
                     f.truncate(0)
                 shutil.copyfileobj(r, f, length=1 << 20)
-            if size is None or dest.stat().st_size >= size:
+            if size is None:
                 break
         except OSError:
-            time.sleep(min(5 * (attempt + 1), 60))
-    else:
-        raise OSError(f"could not download {url}")
+            pass
+        if (dest.stat().st_size if dest.exists() else 0) > have:
+            stalled = 0
+        else:
+            stalled += 1
+            if stalled >= retries:
+                raise OSError(f"could not download {url}: no progress in {retries} attempts")
+            time.sleep(min(5 * stalled, 60))
     digest = hashlib.md5(dest.read_bytes()).hexdigest()
     if digest != md5:
         dest.unlink()
