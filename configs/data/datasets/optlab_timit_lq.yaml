@@ -1,0 +1,4 @@
+# OptLab-TIMIT, lower-quality fakes: all VidTIMIT reals + DeepfakeTIMIT LQ (64 px model).
+name: optlab_timit_lq
+has_audio: true
+access_notes: "Open access on Zenodo (VidTIMIT 158963, DeepfakeTIMIT 4068245), CC BY-NC-ND 4.0, research use. Audio of fakes is the untouched original, so it carries no real/fake signal."

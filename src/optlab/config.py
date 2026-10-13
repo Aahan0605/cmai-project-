@@ -63,7 +63,9 @@ class ModelConfig(_Strict):
 
 
 class DatasetConfig(_Strict):
-    name: Literal["faceforensics_pp", "celeb_df_v2", "fakeavceleb"]
+    name: Literal[
+        "faceforensics_pp", "celeb_df_v2", "fakeavceleb", "optlab_timit_hq", "optlab_timit_lq"
+    ]
     has_audio: bool = False
     compression: str | None = None
     access_notes: str | None = None

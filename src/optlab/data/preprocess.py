@@ -44,7 +44,25 @@ def read_sampled_frames(path: Path, k: int) -> tuple[list[int], list[np.ndarray]
 
 
 def load_audio(path: Path, sample_rate: int) -> np.ndarray:
-    """Mono float32 waveform in [-1, 1] at `sample_rate`, decoded by ffmpeg."""
+    """Mono float32 waveform in [-1, 1] at `sample_rate`.
+
+    A sibling `<video>.wav` (as written for OptLab-TIMIT) is read directly and resampled;
+    otherwise ffmpeg decodes the video's audio track.
+    """
+    wav_path = Path(path).with_suffix(".wav")
+    if wav_path.exists():
+        from math import gcd
+
+        from scipy.signal import resample_poly
+
+        with wave.open(str(wav_path)) as w:
+            if w.getsampwidth() != 2:
+                raise ValueError(f"{wav_path}: expected 16-bit PCM")
+            pcm = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
+            pcm = pcm.reshape(-1, w.getnchannels()).mean(axis=1)
+            rate = w.getframerate()
+        g = gcd(rate, sample_rate)
+        return resample_poly(pcm / 32768.0, sample_rate // g, rate // g).astype(np.float32)
     out = subprocess.run(
         [
             "ffmpeg",

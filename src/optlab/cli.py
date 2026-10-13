@@ -6,7 +6,11 @@ import argparse
 from pathlib import Path
 
 DEFAULT_DB = "results/results.db"
-DATASET_ALIASES = {"ff++": "faceforensics_pp", "celeb-df": "celeb_df_v2"}
+DATASET_ALIASES = {
+    "ff++": "faceforensics_pp",
+    "celeb-df": "celeb_df_v2",
+    "optlab-timit": "optlab_timit",
+}
 
 
 def cmd_init_db(args: argparse.Namespace) -> None:
@@ -76,26 +80,50 @@ def cmd_prepare(args: argparse.Namespace) -> None:
     from optlab.db.repository import id_of, upsert_dataset_split
 
     name = DATASET_ALIASES.get(args.dataset, args.dataset)
-    ds = config.load_datasets(args.configs)[name]
     split_cfg = config.load_splits(args.configs)
-    if name == "faceforensics_pp":
-        rows = m.assign_splits(
-            m.parse_faceforensics(args.root, ds.compression or "c23", ds.methods or []), split_cfg
-        )
-        seed = split_cfg.seed
+    seed: int | None = split_cfg.seed
+    if name == "optlab_timit":
+        from optlab.data import timit
+
+        # One identity split shared by both qualities, so the LQ test set is as unseen
+        # (identity-disjoint from HQ training) as the HQ test set.
+        hq, lq = timit.parse(args.root, "hq"), timit.parse(args.root, "lq")
+        reals = [r for r in hq if r.label == 0]
+        m.assign_splits(reals + [r for r in hq if r.label] + [r for r in lq if r.label], split_cfg)
+        outputs = {
+            "optlab_timit_hq": [r for r in hq],
+            "optlab_timit_lq": reals + [r for r in lq if r.label],
+        }
+    elif name == "faceforensics_pp":
+        ds = config.load_datasets(args.configs)[name]
+        outputs = {
+            name: m.assign_splits(
+                m.parse_faceforensics(args.root, ds.compression or "c23", ds.methods or []),
+                split_cfg,
+            )
+        }
     elif name == "celeb_df_v2":
-        rows, seed = m.parse_celeb_df(args.root), None
+        outputs, seed = {name: m.parse_celeb_df(args.root)}, None
     else:
         raise SystemExit(f"no parser for {name} yet (dataset layout not verified)")
-    path = args.out / f"{name}.csv"
-    m.write_manifest(rows, path)
-    counts = Counter(r.split for r in rows)
     conn = connect(args.db)
-    for split, n in counts.items():
-        upsert_dataset_split(conn, id_of(conn, "datasets", name), split, path.as_posix(), n, seed)
+    for ds_name, rows in outputs.items():
+        path = args.out / f"{ds_name}.csv"
+        m.write_manifest(rows, path)
+        counts = Counter(r.split for r in rows)
+        for split, n in counts.items():
+            upsert_dataset_split(
+                conn, id_of(conn, "datasets", ds_name), split, path.as_posix(), n, seed
+            )
+        print(f"{path}: {dict(counts)}")
     conn.commit()
     conn.close()
-    print(f"{path}: {dict(counts)}")
+
+
+def cmd_fetch_timit(args: argparse.Namespace) -> None:
+    from optlab.data import timit
+
+    timit.fetch(args.raw, args.root)
 
 
 def cmd_extract(args: argparse.Namespace) -> None:
@@ -220,12 +248,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_merge_db)
 
     p = sub.add_parser("prepare", help="identity-disjoint split manifests from a dataset copy")
-    p.add_argument("--dataset", required=True, help="faceforensics_pp (ff++) or celeb_df_v2")
+    p.add_argument(
+        "--dataset", required=True, help="faceforensics_pp (ff++), celeb_df_v2 or optlab_timit"
+    )
     p.add_argument("--root", required=True, type=Path, help="local dataset root")
     p.add_argument("--out", type=Path, default=Path("manifests"))
     p.add_argument("--db", default=DEFAULT_DB)
     p.add_argument("--configs", default="configs")
     p.set_defaults(func=cmd_prepare)
+
+    p = sub.add_parser("fetch-timit", help="download + standardise OptLab-TIMIT (open data)")
+    p.add_argument("--raw", type=Path, default=Path("data/raw"), help="download/scratch folder")
+    p.add_argument("--root", type=Path, default=Path("data/timit"), help="standardised clips")
+    p.set_defaults(func=cmd_fetch_timit)
 
     p = sub.add_parser("extract", help="face crops -> frozen-backbone feature cache")
     p.add_argument("--dataset", required=True)

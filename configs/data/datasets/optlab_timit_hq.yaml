@@ -1,0 +1,5 @@
+# OptLab-TIMIT, higher-quality fakes: all VidTIMIT reals + DeepfakeTIMIT HQ (128 px model).
+# Built locally by `optlab fetch-timit`; both sources are open access, CC BY-NC-ND 4.0.
+name: optlab_timit_hq
+has_audio: true
+access_notes: "Open access on Zenodo (VidTIMIT 158963, DeepfakeTIMIT 4068245), CC BY-NC-ND 4.0, research use. Audio of fakes is the untouched original, so it carries no real/fake signal."
