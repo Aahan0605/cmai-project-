@@ -1,7 +1,7 @@
 DB ?= results/results.db
 OPTLAB = uv run optlab
 
-.PHONY: setup test lint toy
+.PHONY: setup test lint toy baseline
 
 setup:
 	uv sync
@@ -18,3 +18,9 @@ toy:
 	$(OPTLAB) init-db --db $(DB)
 	$(OPTLAB) toy --db $(DB) --config configs/experiments/toy.yaml --force
 	$(OPTLAB) toy-report --db $(DB) --out results/toy --summary results/toy_summary.md
+
+# Phase 2 (needs manifests + feature caches): tune, train, fuse, evaluate, then statistics.
+baseline:
+	$(OPTLAB) init-db --db $(DB)
+	$(OPTLAB) sweep --experiment baseline_v1 --db $(DB)
+	$(OPTLAB) stats --experiment baseline_v1 --db $(DB)

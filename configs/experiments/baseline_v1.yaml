@@ -1,0 +1,18 @@
+name: baseline_v1
+phase: baseline
+description: >
+  Phase 2. Every optimizer trains the same late-fusion heads on cached FF++ features under
+  an equal tuning budget, then 5 seeds at the selected hyperparameters. In-distribution test
+  on FF++ (identity-disjoint), cross-dataset test on Celeb-DF v2.
+hypothesis: >
+  Adaptive optimizers converge faster but show a larger in-distribution to cross-dataset gap
+  than SGD with momentum; SAM narrows the gap.
+train_dataset: faceforensics_pp
+eval:
+  in_distribution: faceforensics_pp
+  cross_dataset: [celeb_df_v2]
+model: clip_vit_b16__freq__weighted_sum
+optimizers: [sgd, sgd_momentum, nag, rmsprop, adam, adamw, radam, adabelief, lion, sam_sgd_momentum]
+tuning: {method: random, trials: 20, epochs: 10, seed: 0}
+training: {max_epochs: 30, batch_size: 256, patience: 5, clip_norm: null, schedule: constant}
+seeds: [0, 1, 2, 3, 4]

@@ -143,6 +143,44 @@ class ToyExperimentConfig(_Strict):
     benchmarks: list[ToyBenchmarkConfig]
 
 
+class EvalConfig(_Strict):
+    in_distribution: str
+    cross_dataset: list[str] = Field(default_factory=list)
+
+
+class TuningConfig(_Strict):
+    method: Literal["random", "grid", "pso", "ga"] = "random"
+    trials: int = Field(20, ge=1)  # the same budget for every optimizer (TRD 7)
+    epochs: int = Field(10, ge=1)  # shortened training per trial
+    seed: int = 0
+
+
+class TrainingConfig(_Strict):
+    max_epochs: int = Field(30, ge=1)
+    batch_size: int = Field(256, ge=1)
+    patience: int = Field(5, ge=1)  # early stopping on val_tune video AUC
+    clip_norm: float | None = None
+    schedule: Literal["constant"] = "constant"
+
+
+class ExperimentConfig(_Strict):
+    name: str
+    phase: Literal["baseline", "hybrid", "ablation"]
+    description: str | None = None
+    hypothesis: str
+    train_dataset: str
+    eval: EvalConfig
+    model: str
+    optimizers: list[str]
+    tuning: TuningConfig = Field(default_factory=TuningConfig)
+    training: TrainingConfig = Field(default_factory=TrainingConfig)
+    seeds: list[int]
+    manifests_dir: str = "manifests"
+    features_dir: str = "features"
+    artifacts_dir: str = "artifacts"
+    device: str = "cpu"
+
+
 def _load(path: Path) -> dict[str, Any]:
     with open(path) as f:
         return yaml.safe_load(f)
@@ -172,6 +210,10 @@ def load_splits(configs_dir: str | Path) -> SplitConfig:
 
 def load_extraction(configs_dir: str | Path) -> ExtractionConfig:
     return ExtractionConfig.model_validate(_load(Path(configs_dir) / "data" / "extraction.yaml"))
+
+
+def load_experiment(path: str | Path) -> ExperimentConfig:
+    return ExperimentConfig.model_validate(_load(Path(path)))
 
 
 def load_toy_experiment(path: str | Path) -> ToyExperimentConfig:

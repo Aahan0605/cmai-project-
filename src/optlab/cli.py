@@ -139,6 +139,70 @@ def cmd_extract(args: argparse.Namespace) -> None:
     print(f"{out}: {stats}")
 
 
+def _experiment(args: argparse.Namespace, config_path: Path | None = None):
+    from optlab import config
+    from optlab.db.connection import connect
+    from optlab.pipeline import Experiment
+
+    path = config_path or Path(args.config or f"configs/experiments/{args.experiment}.yaml")
+    conn = connect(args.db)
+    return Experiment(
+        conn,
+        config.load_experiment(path),
+        path,
+        config.load_optimizers(args.configs),
+        config.load_models(args.configs),
+    )
+
+
+def _experiment_of_run(args: argparse.Namespace):
+    from optlab.db.connection import connect
+
+    conn = connect(args.db)
+    row = conn.execute("SELECT config_path FROM runs WHERE id = ?", (args.run_id,)).fetchone()
+    conn.close()
+    if row is None:
+        raise SystemExit(f"no run with id {args.run_id}")
+    return _experiment(args, Path(row[0]))
+
+
+def cmd_tune(args: argparse.Namespace) -> None:
+    exp = _experiment(args)
+    best = exp.tune(args.optimizer)
+    print(
+        f"selected trial {best['trial_index']}: val AUC {best['val_auc']},"
+        f" {best['hyperparams_json']}"
+    )
+
+
+def cmd_train(args: argparse.Namespace) -> None:
+    exp = _experiment(args)
+    run_id = exp.train_run(args.optimizer, args.seed, exp.tune(args.optimizer))
+    print(f"run {run_id}")
+
+
+def cmd_fuse(args: argparse.Namespace) -> None:
+    _experiment_of_run(args).fuse(args.run_id, args.solver)
+
+
+def cmd_evaluate(args: argparse.Namespace) -> None:
+    _experiment_of_run(args).evaluate(args.run_id, final=args.final, force=args.force)
+
+
+def cmd_sweep(args: argparse.Namespace) -> None:
+    _experiment(args).sweep()
+
+
+def cmd_stats(args: argparse.Namespace) -> None:
+    from optlab.db.connection import connect
+    from optlab.eval.report import write_stats
+
+    conn = connect(args.db, readonly=True)
+    out = write_stats(conn, args.experiment, args.out or Path("results") / args.experiment)
+    conn.close()
+    print(f"wrote {out}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="optlab")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -174,6 +238,52 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--configs", default="configs")
     p.set_defaults(func=cmd_extract)
 
+    def experiment_args(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--experiment", help="name of configs/experiments/<name>.yaml")
+        p.add_argument("--config", help="explicit experiment config path")
+        p.add_argument("--db", default=DEFAULT_DB)
+        p.add_argument("--configs", default="configs")
+
+    p = sub.add_parser("tune", help="equal-budget hyperparameter search for one optimizer")
+    experiment_args(p)
+    p.add_argument("--optimizer", required=True)
+    p.set_defaults(func=cmd_tune)
+
+    p = sub.add_parser("train", help="one seed at the selected hyperparameters (no-op if done)")
+    experiment_args(p)
+    p.add_argument("--optimizer", required=True)
+    p.add_argument("--seed", type=int, required=True)
+    p.set_defaults(func=cmd_train)
+
+    p = sub.add_parser("fuse", help="fit simplex fusion weights on val_fusion")
+    p.add_argument("--run-id", type=int, required=True)
+    p.add_argument(
+        "--solver",
+        default="qp_cvxpy",
+        choices=["qp_cvxpy", "kkt_closed_form", "projected_gradient"],
+    )
+    p.add_argument("--db", default=DEFAULT_DB)
+    p.add_argument("--configs", default="configs")
+    p.set_defaults(func=cmd_fuse, config=None)
+
+    p = sub.add_parser("evaluate", help="validation metrics; --final writes test rows once")
+    p.add_argument("--run-id", type=int, required=True)
+    p.add_argument("--final", action="store_true", help="also evaluate the test splits")
+    p.add_argument("--force", action="store_true", help="overwrite existing test rows (flagged)")
+    p.add_argument("--db", default=DEFAULT_DB)
+    p.add_argument("--configs", default="configs")
+    p.set_defaults(func=cmd_evaluate, config=None)
+
+    p = sub.add_parser("sweep", help="tune, train, fuse and evaluate everything (resumable)")
+    experiment_args(p)
+    p.set_defaults(func=cmd_sweep)
+
+    p = sub.add_parser("stats", help="tables, pairwise tests and plots for an experiment")
+    p.add_argument("--experiment", required=True)
+    p.add_argument("--db", default=DEFAULT_DB)
+    p.add_argument("--out", type=Path)
+    p.set_defaults(func=cmd_stats)
+
     p = sub.add_parser("toy", help="run optimizers on the toy benchmarks (resumable)")
     p.add_argument("--db", default=DEFAULT_DB)
     p.add_argument("--config", default="configs/experiments/toy.yaml")
@@ -193,5 +303,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
+    from optlab.db.repository import TestSplitAlreadyWritten
+
     args = build_parser().parse_args(argv)
-    args.func(args)
+    try:
+        args.func(args)
+    except TestSplitAlreadyWritten as e:
+        raise SystemExit(f"error: {e}") from None
