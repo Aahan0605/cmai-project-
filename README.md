@@ -196,6 +196,9 @@ optlab toy [--force]                             # toy benchmarks (resumable)
 optlab toy-report                                # tables, plots and summary from the DB
 optlab prepare --dataset ff++ --root DATA/FF++   # identity-disjoint split manifests
 optlab extract --dataset ff++ --backbone clip_vit_b16 --root DATA/FF++ --device cuda
+optlab sweep --experiment baseline_v1           # tune -> train -> fuse -> evaluate, resumable
+optlab stats --experiment baseline_v1           # leaderboard, CIs, pairwise tests, gap, plots
+optlab evaluate --run-id 12 --final             # test splits are written once; --force is flagged
 optlab merge-db a.db b.db --out merged.db        # combine databases from separate GPU sessions
 ```
 
@@ -218,7 +221,7 @@ flowchart LR
 |---|---|---|
 | 0 Setup | Configs, results database (schema v2), data pipeline | ✅ Done |
 | 1 Toy benchmarks | Optimizers checked against known minima | ✅ Done |
-| 2 Baselines | Equal-budget tuning, 5 seeds, in-distribution + cross-dataset tests | ⏳ Waiting for dataset access |
+| 2 Baselines | Equal-budget tuning, 5 seeds, in-distribution + cross-dataset tests | 🛠️ Code ready and tested on synthetic features; ⏳ waiting for dataset access |
 | 3 Hybrid design | Update rule motivated by the Phase 2 findings; frozen before testing | Planned |
 | 4 Hybrid evaluation | Same budget and seeds as the baselines, plus ablations | Planned |
 | 5 Presentation | Read-only API and results dashboard | Planned |
@@ -237,6 +240,12 @@ src/optlab/
   toy/              benchmark functions, runner, report and plots
   data/             manifests, face crop, frame sampling, extractors, feature cache, dataset
   db/               SQLite connection, migrations, repository, merge
+  models/           per-modality heads with late fusion
+  train/            trainer (clipping, early stopping, divergence), in-memory splits
+  tune/             equal-budget random / grid / PSO / GA search
+  fusion/           simplex fusion: cvxpy QP, KKT closed form, projected gradient
+  eval/             metrics, bootstrap CIs, Holm-corrected tests, stats report
+  pipeline.py       tune -> train -> fuse -> evaluate -> sweep, recorded in the DB
   cli.py            the `optlab` command
 backend/schema.sql  results database schema (migrations in src/optlab/db/migrations/)
 results/            generated toy summary, tables and plots

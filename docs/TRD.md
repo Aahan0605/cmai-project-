@@ -95,7 +95,8 @@ Primary configuration is **late fusion**:
 - One small MLP head per active modality (`d_in → 256 → 1`, ReLU, dropout 0.2, no batch norm so SAM and clipping behave cleanly).
 - Per-modality logits `z_m(x)`; fused logit `z(x) = Σ_m w_m z_m(x)` with `w` on the simplex (§9).
 - Heads are trained in a single loop on the summed binary cross-entropy `Σ_m BCE(z_m, y)`. Parameters are disjoint; global-norm operations (clipping, SAM's perturbation norm) are computed **per head** so heads stay independent.
-- Alternatives stored in `model_configs.fusion_type`: `concat_mlp` (joint MLP on concatenated features) and `svm_head` (soft-margin SVM on concatenated features; dual in §9.3).
+- Alternatives stored in `model_configs.fusion_type`: `concat_mlp` (joint MLP on concatenated features) and `svm_head` (soft-margin SVM on concatenated features; dual in §9.3). Only `weighted_sum` is implemented so far; the pipeline refuses the others.
+- During training the fusion weights are uniform; early stopping and checkpoint selection use the video-level `val_tune` AUC of that uniform average. The simplex weights are fitted afterwards on `val_fusion` (§9).
 - Batch size is fixed across all optimizers (default 256) and is not tuned.
 - Learning-rate schedule is **constant** by default so the optimizer is not confounded with a schedule; a cosine-schedule ablation is optional.
 - No mixed precision for heads (they are tiny; keeps numerics clean).
@@ -170,7 +171,8 @@ Not implemented before Gate 1. Requirements for any hybrid:
 | Selection | Highest `val_tune` AUC; the chosen trial is flagged `is_selected = 1` and referenced by `runs.tuning_trial_id` |
 | Tuned dimensions | `lr` (log-uniform 1e-5…1e0, narrowed per family in `configs/optim/`) and `weight_decay` (0 or log-uniform 1e-6…1e-2) for **all** optimizers. SAM adds `rho`. Momentum/β fixed at standard defaults. |
 | Supplementary analysis | An "equal-dimension" pass where baselines also tune momentum/β₁, to compare against hybrids that have extra hyperparameters |
-| Search spaces | Stored in `optimizers.default_search_space_json`; one tuner, one budget, enforced in code |
+| Search spaces | Stored in `optimizers.default_search_space_json`; one tuner, one budget, enforced in code (`search()` raises if a method uses a different number of trials) |
+| Search mechanics | All methods propose points in the unit cube, mapped to hyperparameters (log scale for `log_uniform`; `p_zero` mass at exactly 0 for weight decay). Grid: ⌈N^(1/d)⌉ cell-centred points per dimension, of which exactly N are evaluated in a seeded order. PSO: 5 particles. GA: population 5, tournament selection, uniform crossover, Gaussian mutation, elitism without re-evaluation. Trials run on the fixed tuning seed; reruns reuse recorded trials. |
 
 ## 8. Evaluation and statistics
 
@@ -182,7 +184,7 @@ Not implemented before Gate 1. Requirements for any hybrid:
 | `cross_dataset` | FF++ train | Celeb-DF v2 test (no tuning or checkpoint selection on it) |
 | Optional | FF++ minus one manipulation method | The held-out method |
 
-Metrics at `frame` and `video` granularity: AUC, EER, accuracy (threshold fixed from validation), F1, average precision.
+Metrics at `frame` and `video` granularity: AUC, EER, accuracy and F1 (threshold = the EER threshold of the fused score on `val_tune`, per granularity), average precision. The EER is interpolated linearly between the two ROC points that bracket FPR = FNR.
 
 ### 8.2 Test-set discipline (FR-E3)
 
@@ -216,9 +218,9 @@ subject to w ≥ 0,  1ᵀ w = 1
 ```
 
 - **Solver A (`qp_cvxpy`)**: solve with `cvxpy`; recover `λ` and `μ` from the dual variables.
-- **Solver B (`kkt_closed_form`)**: a squared-loss variant `L(w) = ‖Zw − y‖²/n` gives a closed form when the active set is empty: solve `[2ZᵀZ/n  1; 1ᵀ  0][w; λ] = [2Zᵀy/n; 1]`; if any `w_m < 0`, fix that weight at 0 and re-solve on the remaining modalities.
+- **Solver B (`kkt_closed_form`)**: a squared-loss variant `L(w) = ‖Zw − y‖²/n` gives a closed form for a fixed set of free weights: solve `[2Z_FᵀZ_F/n  1; 1ᵀ  0][w_F; λ] = [2Z_Fᵀy/n; 1]`. Every non-empty free set is solved (2^M − 1 ≤ 7 systems) and the lowest-loss non-negative solution kept, which is exact for a convex problem. (Dropping only the most negative weight and re-solving is not guaranteed optimal.)
 - **Solver C (`projected_gradient`)**: projection onto the simplex; used as a cross-check.
-- Store `fusion_weights`, and in `fusion_solves` the objective, the **KKT residual** (norm of stationarity plus complementarity violation), `λ`, and the active set. Tests require residual < 1e-6 for A and B.
+- Store `fusion_weights`, and in `fusion_solves` the objective, the **KKT residual** (norm of stationarity plus complementarity violation), `λ`, and the active set. Tests require residual < 1e-6 for A and B. The residual is computed from the solution itself, the same way for every solver: λ from the free coordinates, μ = ∇L + λ, then the norm of stationarity, dual-feasibility, complementarity and primal-feasibility violations. The default solver is A; cvxpy output is snapped onto the simplex (clip at 0, renormalise) before the check.
 
 ### 9.3 SVM head (optional)
 
@@ -306,7 +308,7 @@ optlab train     --experiment baseline_v1 --optimizer adamw --seed 0
 optlab fuse      --run-id 12
 optlab evaluate  --run-id 12 [--final] [--force]
 optlab sweep     --experiment baseline_v1        # everything above, resumable
-optlab stats     --experiment baseline_v1        # writes tables/ and plots
+optlab stats     --experiment baseline_v1        # results/<experiment>/: summary.md, CSVs, convergence plot
 optlab merge-db  a.db b.db --out merged.db
 optlab export-snapshot --out frontend/public/data
 optlab serve                                     # FastAPI on :8000
