@@ -74,12 +74,14 @@ def test_build_and_parse(tmp_path: Path) -> None:
     assert int(cap.get(cv2.CAP_PROP_FOURCC)).to_bytes(4, "little") in (b"avc1", b"h264")
     assert not (root / "real" / "faaa0" / "head.mp4").exists()
 
-    hq = timit.parse(root, "hq")
-    assert sum(r.label == 0 for r in hq) == len(subjects) * len(SENTS)
+    every = timit.parse(root, "hq", paired_only=False)
+    assert sum(r.label == 0 for r in every) == len(subjects) * len(SENTS)
+    hq = timit.parse(root, "hq")  # default: only people who were also face-swapped
+    assert {r.identity_id for r in hq if r.label == 0} == {"faaa0", "mbbb0"}
     fakes = [r for r in hq if r.label]
     assert {r.identity_id for r in fakes} == {"faaa0+mbbb0", "mbbb0+faaa0"}
     # Real and fake clips of a pair share identities, so the pair lands in one split.
-    split = assign_splits(hq, SplitConfig(seed=0, train=0.5, val=0.25, test=0.25))
+    split = assign_splits(every, SplitConfig(seed=0, train=0.5, val=0.25, test=0.25))
     pair = {r.split for r in split if r.identity_id.split("+")[0] in ("faaa0", "mbbb0")}
     assert len(pair) == 1
 

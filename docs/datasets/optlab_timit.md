@@ -46,8 +46,8 @@ clip, real or fake, ends as H.264 MP4 at 512 × 384 and 25 fps, written by the s
 encode the fakes already went through, so both classes share the history JPEG → H.264 →
 H.264. Raw archives are deleted once their clips are written.
 
-**Two datasets, one split.** `optlab_timit_hq` = all reals + higher-quality fakes;
-`optlab_timit_lq` = all reals + lower-quality fakes. Both manifests come from a single
+**Two datasets, one split.** `optlab_timit_hq` = reals of the 32 swapped people +
+higher-quality fakes; `optlab_timit_lq` = the same reals + lower-quality fakes. Both manifests come from a single
 identity-disjoint split: a fake shows two people (the person in the video and the face donor),
 so each swap pair and its real clips form one group, assigned whole to train, val or test
 (70 / 15 / 15 by clip count, seed 0; val is further split into `tune` and `fusion` halves).
@@ -74,8 +74,15 @@ FF++ → Celeb-DF transfer the project was designed around, and it is reported a
   validation AUC up to 0.72. `fetch-timit` therefore replaces each fake's WAV with the real
   clip's original (`align_fake_audio`), making the audio byte-identical across classes. It is
   kept as a control stream.
-- **Small.** 43 people, 430 real clips and 320 fake clips per quality: per-seed variance will
-  be large, and few comparisons will be distinguishable.
+- **Never-swapped people are excluded.** 11 of VidTIMIT's 43 people have no DeepfakeTIMIT
+  fakes. Kept in, they are always "real", so anything that identifies them (voice,
+  appearance, recording session) predicts the label; in `baseline_timit_v2` (superseded) the
+  audio stream reached validation AUC 0.64 that way although audio was identical across
+  classes. The manifests therefore keep only the 32 swapped people (`timit.parse(...,
+  paired_only=True)`): every person has 10 real and 10 fake clips, and every audio clip
+  appears once as real and once as fake.
+- **Small.** 32 people, 320 real and 320 fake clips per quality: per-seed variance will be
+  large, and few comparisons will be distinguishable.
 - **Old and easy fakes.** DeepfakeTIMIT (2018) fakes are lower quality than modern deepfakes,
   so in-distribution AUC may saturate near 1.0, which leaves little room to separate
   optimizers. The LQ transfer test and the convergence metrics then carry most of the signal.

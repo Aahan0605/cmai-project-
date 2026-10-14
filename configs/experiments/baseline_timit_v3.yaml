@@ -1,0 +1,26 @@
+name: baseline_timit_v3
+phase: baseline
+description: >
+  Phase 2 on OptLab-TIMIT (open data, built by `optlab fetch-timit`), restricted to the 32
+  people who appear both real and face-swapped (10 real + 10 fake clips each). Supersedes
+  baseline_timit (fakes had DeepfakeTIMIT's resampled audio, so audio leaked the label) and
+  baseline_timit_v2 (11 never-swapped people were always real, so cues identifying them
+  leaked the label: audio alone reached validation AUC 0.64 with audio identical across
+  classes). Here every audio clip appears once as real and once as fake with identical
+  bytes, so audio cannot separate the classes. Late-fusion heads on cached CLIP /
+  wav2vec 2.0 / frequency features, equal tuning budget per optimizer, 5 seeds. Train on
+  reals + DeepfakeTIMIT higher-quality fakes; in-distribution test on held-out people;
+  "unseen" test on the same held-out people with the lower-quality fakes.
+hypothesis: >
+  Adaptive optimizers converge faster but show a larger HQ-to-LQ generalization gap than SGD
+  with momentum; SAM narrows the gap. The fitted fusion weight on audio is near zero for
+  every optimizer.
+train_dataset: optlab_timit_hq
+eval:
+  in_distribution: optlab_timit_hq
+  cross_dataset: [optlab_timit_lq]
+model: clip_vit_b16__wav2vec2__freq__weighted_sum
+optimizers: [sgd, sgd_momentum, nag, rmsprop, adam, adamw, radam, adabelief, lion, sam_sgd_momentum]
+tuning: {method: random, trials: 20, epochs: 10, seed: 0}
+training: {max_epochs: 30, batch_size: 256, patience: 5, clip_norm: null, schedule: constant}
+seeds: [0, 1, 2, 3, 4]

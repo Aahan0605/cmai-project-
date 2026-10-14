@@ -245,9 +245,17 @@ def fetch(raw: Path, root: Path, log: Log = print) -> None:
     log(f"aligned audio of {align_fake_audio(root)} fake clips with their real originals")
 
 
-def parse(root: Path, quality: str) -> list[VideoRow]:
-    """Every real clip plus the fakes of one quality. A fake shows two people (the person
-    in the video and the face donor), so both identities link it for the split."""
+def parse(root: Path, quality: str, paired_only: bool = True) -> list[VideoRow]:
+    """Real clips plus the fakes of one quality. A fake shows two people (the person in the
+    video and the face donor), so both identities link it for the split.
+
+    With `paired_only` (the default), only the 32 people who also appear in DeepfakeTIMIT are
+    kept, so every person contributes 10 real and 10 fake clips. The other 11 VidTIMIT people
+    would only ever be real: any cue that identifies "someone who was never face-swapped"
+    (voice, appearance, recording session) would then predict the label, which it did for the
+    audio stream in baseline_timit_v2 (validation AUC 0.64 on audio identical across classes).
+    """
+    paired = {p.name for p in (root / f"fake_{quality}").glob("*") if p.is_dir()}
     rows = [
         VideoRow(
             f"real/{p.parent.name}/{p.stem}",
@@ -257,6 +265,7 @@ def parse(root: Path, quality: str) -> list[VideoRow]:
             p.parent.name,
         )
         for p in sorted((root / "real").glob("*/*.mp4"))
+        if not paired_only or p.parent.name in paired
     ]
     for p in sorted((root / f"fake_{quality}").glob("*/*.mp4")):
         sent, donor = p.stem.rsplit("-", 1)
