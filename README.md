@@ -25,6 +25,7 @@
 - [Highlights](#highlights)
 - [How it works](#how-it-works)
 - [Phase 1 results: toy benchmarks](#phase-1-results-toy-benchmarks)
+- [Phase 2 results: optimizer baselines](#phase-2-results-optimizer-baselines)
 - [Gallery](#gallery)
 - [Quickstart](#quickstart)
 - [Project status and roadmap](#project-status-and-roadmap)
@@ -163,6 +164,41 @@ database.
 The selected learning rates, final values and the hypothesis written before these runs are in
 the [full summary](results/toy_summary.md).
 
+## Phase 2 results: optimizer baselines
+
+**Data.** FaceForensics++, Celeb-DF and FakeAVCeleb are available only on request, so Phase 2
+runs on **OptLab-TIMIT**, an open real/fake dataset assembled from VidTIMIT (real) and
+DeepfakeTIMIT (face swaps), both open access on Zenodo under CC BY-NC-ND 4.0. It has
+32 people with 10 real and 10 fake clips each, split by person. The test uses higher-quality
+fakes, and the "unseen" test uses lower-quality fakes of the same 4 held-out people. See the
+[dataset card](docs/datasets/optlab_timit.md) for construction, licences, citations and the two
+confounds found and removed along the way.
+
+**Protocol.** 10 optimizers, 20 tuning trials each, then 5 seeds at the selected
+hyperparameters: 50 runs, none diverged, 85 s of training in total on a laptop CPU.
+
+<p align="center">
+  <img src="results/baseline_timit_v3/convergence_val_auc.png" alt="Validation AUC per epoch, mean and spread over five seeds, for ten optimizers" width="720">
+</p>
+
+**Findings** (all from the results database; details in the
+[baseline analysis](docs/baseline_analysis.md)):
+- **No optimizer is distinguishable from another**: 0 of 45 pairs on either test after Holm
+  correction. On the in-distribution test, nine of the ten lie within 0.025 AUC of each other
+  (video AUC 0.748–0.773). This is a null result, limited by 5 seeds and 4 test people.
+- **Plain SGD is the weakest**: lowest mean on both tests (0.707 and 0.803) and the noisiest,
+  but not significantly worse.
+- **Lion reaches the convergence target fastest and most reliably** (5 of 5 seeds, median 3
+  epochs). Adaptive methods as a group are not consistently faster than SGD with momentum.
+- **The lower-quality fakes turned out easier** (every optimizer scores higher on them), so
+  this dataset cannot test generalization to *harder* unseen fakes.
+- **Simplex fusion weights are not stream importance.** An audio stream that is uninformative
+  by construction (AUC exactly 0.5 in every run) still gets an average weight of 0.35, because
+  the weights also absorb the visual head's overconfidence. The constrained solver itself is
+  exact (KKT residual < 1e-6 in all 50 runs).
+
+Full tables, with bootstrap CIs and pairwise tests: [results/baseline_timit_v3/summary.md](results/baseline_timit_v3/summary.md).
+
 ## Gallery
 
 <table>
@@ -186,6 +222,12 @@ cd cmai-project-
 make setup   # install dependencies
 make test    # unit tests on CPU
 make toy     # rerun the toy suite; regenerates results/toy_summary.md and every plot (~6 min, CPU)
+
+# Phase 2 on open data (≈3.5 GB download, ≈35 min feature extraction on a laptop):
+uv sync --extra extract
+optlab fetch-timit && optlab prepare --dataset optlab_timit --root data/timit
+optlab extract --dataset optlab_timit_hq --backbone clip_vit_b16 --root data/timit   # likewise lq, wav2vec2_base
+optlab sweep --experiment baseline_timit_v3 && optlab stats --experiment baseline_timit_v3
 ```
 
 ### Command-line interface
@@ -210,8 +252,8 @@ request; this repository only ever stores split manifests, never videos, frames 
 
 ```mermaid
 flowchart LR
-    P0["0 · Setup"]:::done --> P1["1 · Toy benchmarks"]:::done --> P2["2 · Baselines"]:::next
-    P2 --> G1{{"Gate 1<br/>baseline analysis"}} --> P3["3 · Hybrid design"] --> G2{{"Gate 2<br/>design frozen"}}
+    P0["0 · Setup"]:::done --> P1["1 · Toy benchmarks"]:::done --> P2["2 · Baselines"]:::done
+    P2 --> G1{{"Gate 1<br/>baseline analysis"}}:::next --> P3["3 · Hybrid design"] --> G2{{"Gate 2<br/>design frozen"}}
     G2 --> P4["4 · Hybrid evaluation<br/>+ ablations"] --> P5["5 · Dashboard + report"]
     classDef done fill:#047857,color:#fff,stroke:#047857
     classDef next fill:#1D4ED8,color:#fff,stroke:#1D4ED8
@@ -221,7 +263,7 @@ flowchart LR
 |---|---|---|
 | 0 Setup | Configs, results database (schema v2), data pipeline | ✅ Done |
 | 1 Toy benchmarks | Optimizers checked against known minima | ✅ Done |
-| 2 Baselines | Equal-budget tuning, 5 seeds, in-distribution + cross-dataset tests | 🛠️ Code ready and tested on synthetic features; ⏳ waiting for dataset access |
+| 2 Baselines | Equal-budget tuning, 5 seeds, in-distribution + unseen-fake tests | ✅ Done on OptLab-TIMIT ([analysis](docs/baseline_analysis.md)); FF++ / Celeb-DF still pending access |
 | 3 Hybrid design | Update rule motivated by the Phase 2 findings; frozen before testing | Planned |
 | 4 Hybrid evaluation | Same budget and seeds as the baselines, plus ablations | Planned |
 | 5 Presentation | Read-only API and results dashboard | Planned |
@@ -279,6 +321,8 @@ technical specification; [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) has the di
 - Rössler et al. (2019). *FaceForensics++.*
 - Li et al. (2020). *Celeb-DF.*
 - Khalid et al. (2021). *FakeAVCeleb.*
+- Korshunov & Marcel (2018). *DeepFakes: a New Threat to Face Recognition? Assessment and Detection.* (DeepfakeTIMIT)
+- Sanderson & Lovell (2009). *Multi-Region Probabilistic Histograms for Robust and Scalable Identity Inference.* (VidTIMIT)
 
 ## License
 
