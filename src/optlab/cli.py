@@ -141,7 +141,7 @@ def cmd_extract(args: argparse.Namespace) -> None:
             args.root,
             out,
             cfg,
-            detector=faces.MTCNNDetector(args.device),
+            detector=faces.MTCNNDetector(args.detector_device),
             extractor=extractors.ClipVisualExtractor(
                 args.backbone, spec["arch"], spec["pretrained"], args.device
             ),
@@ -268,7 +268,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--root", required=True, type=Path, help="local dataset root")
     p.add_argument("--manifest", type=Path)
     p.add_argument("--out", type=Path, default=Path("features"))
-    p.add_argument("--device", default="cpu")
+    p.add_argument("--device", default="cpu", help="backbone device (cpu, cuda, mps)")
+    p.add_argument("--detector-device", default="cpu", help="face detector device")
     p.add_argument("--no-frequency", action="store_true", help="skip the frequency stream")
     p.add_argument("--configs", default="configs")
     p.set_defaults(func=cmd_extract)

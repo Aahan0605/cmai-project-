@@ -16,6 +16,7 @@ fakes' first H.264 encode used the DeepfakeTIMIT authors' (unknown) settings.
 Layout written under `root`:
   real/<subject>/<sentence>.mp4 + .wav
   fake_hq/<subject>/<sentence>-<face donor>.mp4 + .wav   (likewise fake_lq/)
+A fake's .wav is a copy of the real clip's .wav (see `align_fake_audio`).
 Only manifests are committed; the videos stay local (the licence forbids redistribution
 of derivatives).
 """
@@ -193,6 +194,25 @@ def standardize_fakes(extracted: Path, root: Path) -> int:
     return count
 
 
+def align_fake_audio(root: Path) -> int:
+    """Give every fake clip the original VidTIMIT WAV of the same person and sentence.
+
+    DeepfakeTIMIT's README says the audio was kept, but its WAVs are resampled to 16 kHz
+    while VidTIMIT's are 32 kHz. Left as is, the two classes differ in resampling artefacts and
+    the audio stream can detect that instead of the face swap. Copying the real WAV makes the
+    audio identical across classes, so it carries no label information by construction.
+    """
+    count = 0
+    for fake in sorted(root.glob("fake_*/*/*.mp4")):
+        sent = fake.stem.rsplit("-", 1)[0]
+        real = root / "real" / fake.parent.name / f"{sent}.wav"
+        if not real.exists():
+            raise FileNotFoundError(f"no real audio {real} for {fake}")
+        shutil.copyfile(real, fake.with_suffix(".wav"))
+        count += 1
+    return count
+
+
 def fetch(raw: Path, root: Path, log: Log = print) -> None:
     """Download and standardise everything; resumable. Raw archives are deleted once
     their clips are written, so peak disk use stays near one archive."""
@@ -222,6 +242,7 @@ def fetch(raw: Path, root: Path, log: Log = print) -> None:
         download(info["url"], zip_path, info["md5"], info["size"])
         log(f"{subject}: {standardize_real(zip_path, root)} real clips")
         zip_path.unlink()
+    log(f"aligned audio of {align_fake_audio(root)} fake clips with their real originals")
 
 
 def parse(root: Path, quality: str) -> list[VideoRow]:

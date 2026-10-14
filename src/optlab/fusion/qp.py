@@ -18,8 +18,9 @@ def solve(z: np.ndarray, y_pm: np.ndarray) -> FusionSolution:
     objective = cp.sum(cp.logistic(-cp.multiply(y_pm, z @ w))) / len(y_pm)
     problem = cp.Problem(cp.Minimize(objective), [w >= 0, cp.sum(w) == 1])
     problem.solve()
-    if problem.status != cp.OPTIMAL:
+    if problem.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
         raise RuntimeError(f"fusion QP did not solve: {problem.status}")
+    # An "inaccurate" optimum is returned as is; the caller judges it by its KKT residual.
     # Solver output can sit 1e-10 outside the simplex; snap it back before the KKT check.
     sol = np.clip(np.asarray(w.value), 0.0, None)
     sol /= sol.sum()

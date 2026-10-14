@@ -83,6 +83,13 @@ def test_build_and_parse(tmp_path: Path) -> None:
     pair = {r.split for r in split if r.identity_id.split("+")[0] in ("faaa0", "mbbb0")}
     assert len(pair) == 1
 
+    # DeepfakeTIMIT ships its own (resampled) WAVs; after alignment they equal the originals.
+    for f in root.glob("fake_hq/faaa0/sa1-*.wav"):
+        f.write_bytes(wav_bytes(rate=16000))
+    assert timit.align_fake_audio(root) == 2 * 2 * len(SENTS)
+    fake_wav = next(root.glob("fake_hq/faaa0/sa1-*.wav"))
+    assert fake_wav.read_bytes() == (root / "real" / "faaa0" / "sa1.wav").read_bytes()
+
     audio = load_audio(clip, 16000)
     assert audio.dtype == np.float32 and len(audio) == 8000  # 0.5 s resampled 32k -> 16k
     assert np.abs(audio).max() == pytest.approx(0.3, abs=0.01)

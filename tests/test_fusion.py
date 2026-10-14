@@ -37,6 +37,16 @@ def test_closed_form_matches_cvxpy_on_squared_loss(seed: int) -> None:
     assert b.kkt_residual < 1e-6
 
 
+def test_qp_returns_inaccurate_optimum_for_caller_to_judge() -> None:
+    # Large logits (like a very confident head) stress the conic solver; the result must still
+    # be on the simplex, and projected gradient must reach a tight KKT residual.
+    z, y = problem(0)
+    z = z * 20
+    a = qp.solve(z, y)
+    assert a.weights.min() >= 0 and a.weights.sum() == pytest.approx(1.0)
+    assert projected_gradient.solve(z, y).kkt_residual < 1e-6
+
+
 def test_noise_modality_is_switched_off() -> None:
     z, y = problem(0)
     sol = qp.solve(z, y)

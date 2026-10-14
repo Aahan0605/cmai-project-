@@ -39,6 +39,7 @@ from optlab.train.data import Split, load_split
 from optlab.train.trainer import build_model, train
 from optlab.tune.search import search
 
+KKT_TOL = 1e-6  # a fusion solution is accepted only below this KKT residual (TRD 9.2)
 SOLVERS = {
     "qp_cvxpy": qp,
     "kkt_closed_form": kkt_closed_form,
@@ -344,6 +345,17 @@ class Experiment:
         z = self._logits(model, self.val_fusion)
         y_pm = self.val_fusion.y.numpy().astype(np.float64) * 2 - 1
         sol = SOLVERS[solver].solve(z, y_pm)
+        if sol.kkt_residual > KKT_TOL and solver != "projected_gradient":
+            # Very confident logits push the conic solver to its precision limit; projected
+            # gradient on the same convex problem is slower but converges to ~1e-11. The
+            # stored `solver` column records which method produced the solution.
+            self.log(
+                f"fuse run {run_id}: {solver} KKT residual {sol.kkt_residual:.1e} > {KKT_TOL:.0e};"
+                " using projected_gradient"
+            )
+            sol = projected_gradient.solve(z, y_pm)
+        if sol.kkt_residual > KKT_TOL:
+            raise RuntimeError(f"fusion for run {run_id} did not converge: {sol.kkt_residual:.1e}")
         with self.conn:
             self.conn.execute("DELETE FROM fusion_weights WHERE run_id = ?", (run_id,))
             self.conn.execute("DELETE FROM fusion_solves WHERE run_id = ?", (run_id,))

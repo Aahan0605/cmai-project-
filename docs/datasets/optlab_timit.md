@@ -67,8 +67,13 @@ FF++ → Celeb-DF transfer the project was designed around, and it is reported a
 
 - **Residual encoding difference.** The fakes' first H.264 encode used the DeepfakeTIMIT
   authors' settings, which are not published; the reals' first encode used ours.
-- **Audio carries no label signal by construction.** The fakes keep the original audio, so a
-  correct fusion should weight the audio stream near zero. It is kept as a control.
+- **Audio carries no label signal by construction, but only after alignment.** DeepfakeTIMIT's
+  README says the original audio was kept, but its WAV files are resampled to 16 kHz while
+  VidTIMIT's are 32 kHz. Used as shipped, the two classes differ in resampling artefacts, and
+  in the first baseline (`baseline_timit`, superseded) the audio stream alone reached
+  validation AUC up to 0.72. `fetch-timit` therefore replaces each fake's WAV with the real
+  clip's original (`align_fake_audio`), making the audio byte-identical across classes. It is
+  kept as a control stream.
 - **Small.** 43 people, 430 real clips and 320 fake clips per quality: per-seed variance will
   be large, and few comparisons will be distinguishable.
 - **Old and easy fakes.** DeepfakeTIMIT (2018) fakes are lower quality than modern deepfakes,

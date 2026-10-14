@@ -1,0 +1,11 @@
+optimizer,completed,diverged,failed,tuning trials
+sgd,5,0,0,"20 (random, 0 diverged)"
+nag,5,0,0,"20 (random, 0 diverged)"
+sgd_momentum,5,0,0,"20 (random, 0 diverged)"
+adabelief,5,0,0,"20 (random, 0 diverged)"
+adam,5,0,0,"20 (random, 0 diverged)"
+adamw,5,0,0,"20 (random, 0 diverged)"
+radam,5,0,0,"20 (random, 0 diverged)"
+rmsprop,5,0,0,"20 (random, 0 diverged)"
+lion,5,0,0,"20 (random, 0 diverged)"
+sam_sgd_momentum,5,0,0,"20 (random, 0 diverged)"

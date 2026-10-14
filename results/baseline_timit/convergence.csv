@@ -1,0 +1,11 @@
+optimizer,epochs to val AUC ≥ 0.9412,seeds reaching it,area under val loss,≈ wall clock to target (s),divergence rate
+sgd,20.0,1/5,42.881,1.9,0/5
+nag,7.5,4/5,33.426,0.8,0/5
+sgd_momentum,4.0,3/5,26.146,0.7,0/5
+adabelief,2.0,5/5,22.043,1.8,0/5
+adam,2.0,4/5,20.225,0.7,0/5
+adamw,2.0,3/5,17.803,0.4,0/5
+radam,1.0,5/5,23.432,0.7,0/5
+rmsprop,4.0,3/5,31.161,0.6,0/5
+lion,2.0,5/5,32.485,0.4,0/5
+sam_sgd_momentum,4.5,4/5,24.735,1.6,0/5
