@@ -72,7 +72,7 @@ def conn(root: Path, tmp_path: Path) -> sqlite3.Connection:
 def test_init_is_idempotent(root: Path, tmp_path: Path) -> None:
     make_db(root, tmp_path / "r.db").close()
     c = make_db(root, tmp_path / "r.db")
-    assert c.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert c.execute("PRAGMA user_version").fetchone()[0] == 3
     assert c.execute("SELECT COUNT(*) FROM optimizers").fetchone()[0] == 12
 
 
@@ -80,9 +80,10 @@ def test_migration_upgrades_v1_database(root: Path, tmp_path: Path) -> None:
     conn = connect(tmp_path / "v1.db")
     conn.executescript((root / "backend" / "schema.sql").read_text())  # a pre-migration DB
     assert "library_versions_json" not in columns(conn, "runs")
-    assert init_schema(conn, root / "backend" / "schema.sql") == 2
+    assert init_schema(conn, root / "backend" / "schema.sql") == 3
     assert "library_versions_json" in columns(conn, "runs")
-    assert init_schema(conn, root / "backend" / "schema.sql") == 2  # re-run is a no-op
+    assert {"formulation", "temperature"} <= set(columns(conn, "fusion_solves"))
+    assert init_schema(conn, root / "backend" / "schema.sql") == 3  # re-run is a no-op
 
 
 @pytest.mark.parametrize(

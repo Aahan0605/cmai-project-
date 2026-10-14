@@ -221,6 +221,41 @@ def cmd_sweep(args: argparse.Namespace) -> None:
     _experiment(args).sweep()
 
 
+def cmd_cv(args: argparse.Namespace) -> None:
+    from optlab import config
+    from optlab.cv import write_folds
+
+    base_path = Path(args.config or f"configs/experiments/{args.experiment}.yaml")
+    base = config.load_experiment(base_path)
+    if not base.cv_folds:
+        raise SystemExit(f"{base_path} has no cv_folds")
+    folds = write_folds(
+        base,
+        base.cv_folds,
+        base.cv_seed,
+        Path(base.manifests_dir) / "cv" / base.name,
+        Path("configs/experiments/cv"),
+    )
+    print(f"wrote {len(folds)} fold configs")
+    if args.prepare_only:
+        return
+    for path in folds:
+        print(f"== {path.stem}")
+        _experiment(args, path).sweep()
+    cmd_cv_stats(args, base.name)
+
+
+def cmd_cv_stats(args: argparse.Namespace, name: str | None = None) -> None:
+    from optlab.db.connection import connect
+    from optlab.eval.cv_report import write_cv_report
+
+    name = name or args.experiment
+    conn = connect(args.db, readonly=True)
+    out = write_cv_report(conn, name, Path("results") / name)
+    conn.close()
+    print(f"wrote {out}")
+
+
 def cmd_stats(args: argparse.Namespace) -> None:
     from optlab.db.connection import connect
     from optlab.eval.report import write_stats
@@ -313,6 +348,16 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("sweep", help="tune, train, fuse and evaluate everything (resumable)")
     experiment_args(p)
     p.set_defaults(func=cmd_sweep)
+
+    p = sub.add_parser("cv", help="grouped cross-validation: fold manifests + sweep per fold")
+    experiment_args(p)
+    p.add_argument("--prepare-only", action="store_true", help="only write fold manifests/configs")
+    p.set_defaults(func=cmd_cv)
+
+    p = sub.add_parser("cv-stats", help="paired-by-fold comparison across the folds of a cv run")
+    p.add_argument("--experiment", required=True, help="base experiment name")
+    p.add_argument("--db", default=DEFAULT_DB)
+    p.set_defaults(func=cmd_cv_stats)
 
     p = sub.add_parser("stats", help="tables, pairwise tests and plots for an experiment")
     p.add_argument("--experiment", required=True)

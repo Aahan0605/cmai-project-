@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from optlab import config
-from optlab.config import ExperimentConfig, SplitConfig
+from optlab.config import EvalConfig, ExperimentConfig, SplitConfig
 from optlab.data.cache import FeatureCacheWriter
 from optlab.data.manifest import VideoRow, assign_splits, write_manifest
 from optlab.db.connection import connect, init_schema
@@ -148,3 +148,57 @@ def test_val_roles_are_disjoint(setup) -> None:
         tmp_path / "manifests" / "faceforensics_pp.csv", "test", exp._caches("faceforensics_pp")
     )
     assert not set(test.video_ids) & (set(tune.video_ids) | set(exp.train_split.video_ids))
+
+
+def test_cross_validation_end_to_end(setup, root: Path) -> None:
+    import csv
+
+    from optlab.cv import write_folds
+    from optlab.eval.cv_report import write_cv_report
+
+    exp, conn, tmp_path = setup
+    base = exp.cfg.model_copy(
+        update={
+            "name": "cv_test",
+            "optimizers": ["adam", "sgd_momentum"],
+            "seeds": [0, 1],
+            "fusion": "simplex_temperature",
+            "cv_folds": 3,
+            "eval": EvalConfig(in_distribution="faceforensics_pp"),
+        }
+    )
+    paths = write_folds(base, 3, 0, tmp_path / "cv_manifests", tmp_path / "cv_configs")
+    tested: list[str] = []
+    for k, path in enumerate(paths):
+        rows = list(
+            csv.DictReader(open(tmp_path / "cv_manifests" / f"f{k}" / "faceforensics_pp.csv"))
+        )
+        ids = {
+            s: {r["identity_id"] for r in rows if r["split"] == s} for s in ("train", "val", "test")
+        }
+        assert not (
+            ids["train"] & ids["test"] or ids["train"] & ids["val"] or ids["val"] & ids["test"]
+        )
+        assert {r["val_role"] for r in rows if r["split"] == "val"} == {"tune", "fusion"}
+        tested += sorted(ids["test"])
+        fold = Experiment(
+            conn,
+            config.load_experiment(path),
+            path,
+            exp.optimizers,
+            config.load_models(root / "configs"),
+            log=lambda _: None,
+        )
+        fold.sweep()
+    assert len(tested) == len(set(tested)) == 90  # every identity tested exactly once
+    assert (
+        count(
+            conn,
+            "SELECT COUNT(*) FROM fusion_solves WHERE formulation = 'simplex_temperature'"
+            " AND temperature > 0 AND kkt_residual < 1e-6",
+        )
+        == 3 * 2 * 2
+    )
+    assert count(conn, "SELECT COUNT(*) FROM fusion_weights WHERE contribution IS NULL") == 0
+    text = write_cv_report(conn, "cv_test", tmp_path / "cv_stats").read_text()
+    assert "Paired comparisons:" in text and "mean contribution" in text

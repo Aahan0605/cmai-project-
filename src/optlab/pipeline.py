@@ -33,7 +33,7 @@ from optlab.db.repository import (
     write_evaluation,
 )
 from optlab.eval.metrics import detection_metrics, eer_and_threshold, video_scores
-from optlab.fusion import kkt_closed_form, projected_gradient, qp
+from optlab.fusion import kkt_closed_form, projected_gradient, qp, temperature
 from optlab.models.heads import LateFusion, modalities
 from optlab.train.data import Split, load_split
 from optlab.train.trainer import build_model, train
@@ -340,15 +340,34 @@ class Experiment:
         return model(split.x).numpy().astype(np.float64)
 
     def fuse(self, run_id: int, solver: str = "qp_cvxpy") -> None:
-        """Fit simplex fusion weights on val_fusion; store weights, multiplier, KKT residual."""
+        """Fit fusion weights on val_fusion; store weights, contributions and KKT diagnostics.
+
+        `cfg.fusion` picks the formulation: plain simplex (TRD 9) or simplex with a learned
+        temperature (separates logit scale from mixing; Gate 1 finding).
+        """
         model, _ = self._load_model(run_id)
         z = self._logits(model, self.val_fusion)
         y_pm = self.val_fusion.y.numpy().astype(np.float64) * 2 - 1
+        if self.cfg.fusion == "simplex_temperature":
+            t = temperature.solve(z, y_pm, lam=self.cfg.fusion_ridge, tol=KKT_TOL)
+            self._store_fusion(
+                run_id,
+                t.solver,
+                "simplex_temperature",
+                t.weights,
+                t.contribution,
+                t.objective,
+                t.kkt_residual,
+                None,
+                t.temperature,
+                t.active_set,
+            )
+            return
         sol = SOLVERS[solver].solve(z, y_pm)
         if sol.kkt_residual > KKT_TOL and solver != "projected_gradient":
             # Very confident logits push the conic solver to its precision limit; projected
-            # gradient on the same convex problem is slower but converges to ~1e-11. The
-            # stored `solver` column records which method produced the solution.
+            # gradient (with a Newton polish) on the same convex problem converges to ~1e-11.
+            # The stored `solver` column records which method produced the solution.
             self.log(
                 f"fuse run {run_id}: {solver} KKT residual {sol.kkt_residual:.1e} > {KKT_TOL:.0e};"
                 " using projected_gradient"
@@ -356,25 +375,58 @@ class Experiment:
             sol = projected_gradient.solve(z, y_pm)
         if sol.kkt_residual > KKT_TOL:
             raise RuntimeError(f"fusion for run {run_id} did not converge: {sol.kkt_residual:.1e}")
+        spread = sol.weights * z.std(axis=0)
+        contribution = spread / spread.sum() if spread.sum() > 0 else sol.weights
+        self._store_fusion(
+            run_id,
+            sol.solver,
+            "simplex",
+            sol.weights,
+            contribution,
+            sol.objective,
+            sol.kkt_residual,
+            sol.multiplier,
+            None,
+            sol.active_set,
+        )
+
+    def _store_fusion(
+        self,
+        run_id: int,
+        solver: str,
+        formulation: str,
+        weights: np.ndarray,
+        contribution: np.ndarray,
+        objective: float,
+        residual: float,
+        multiplier: float | None,
+        temp: float | None,
+        active: list[int],
+    ) -> None:
         with self.conn:
             self.conn.execute("DELETE FROM fusion_weights WHERE run_id = ?", (run_id,))
             self.conn.execute("DELETE FROM fusion_solves WHERE run_id = ?", (run_id,))
             insert_many(
                 self.conn,
                 "fusion_weights",
-                ["run_id", "modality", "weight"],
-                [(run_id, m, float(w)) for m, w in zip(self.mods, sol.weights, strict=True)],
+                ["run_id", "modality", "weight", "contribution"],
+                [
+                    (run_id, m, float(w), float(np.clip(c, 0.0, 1.0)))
+                    for m, w, c in zip(self.mods, weights, contribution, strict=True)
+                ],
             )
             insert(
                 self.conn,
                 "fusion_solves",
                 {
                     "run_id": run_id,
-                    "solver": sol.solver,
-                    "objective_value": sol.objective,
-                    "kkt_residual": sol.kkt_residual,
-                    "lagrange_multiplier": sol.multiplier,
-                    "active_set_json": json.dumps([self.mods[i] for i in sol.active_set]),
+                    "solver": solver,
+                    "formulation": formulation,
+                    "objective_value": objective,
+                    "kkt_residual": residual,
+                    "lagrange_multiplier": multiplier,
+                    "temperature": temp,
+                    "active_set_json": json.dumps([self.mods[i] for i in active]),
                 },
             )
 

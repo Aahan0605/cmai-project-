@@ -177,6 +177,12 @@ class ExperimentConfig(_Strict):
     tuning: TuningConfig = Field(default_factory=TuningConfig)
     training: TrainingConfig = Field(default_factory=TrainingConfig)
     seeds: list[int]
+    # 'simplex': w on the simplex (TRD 9). 'simplex_temperature': w on the simplex times a
+    # learned temperature, so the weights no longer absorb logit scale (Gate 1 finding).
+    fusion: Literal["simplex", "simplex_temperature"] = "simplex"
+    fusion_ridge: float = Field(1e-3, ge=0.0)
+    cv_folds: int | None = Field(None, ge=2)  # set for `optlab cv` (grouped by identity)
+    cv_seed: int = 0
     manifests_dir: str = "manifests"
     features_dir: str = "features"
     artifacts_dir: str = "artifacts"

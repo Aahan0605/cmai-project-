@@ -74,3 +74,39 @@ def test_project_simplex() -> None:
     np.testing.assert_allclose(project_simplex(np.array([2.0, 0.0, -1.0])), [1.0, 0.0, 0.0])
     p = project_simplex(np.random.default_rng(1).normal(size=6))
     assert p.min() >= 0 and p.sum() == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_temperature_fusion_cvxpy_and_newton_agree(seed: int) -> None:
+    from optlab.fusion import temperature
+
+    z, y = problem(seed)
+    z = z * np.array([7.0, 0.2, 0.01])  # badly scaled, like trained heads
+    a, b = temperature.solve_cvxpy(z, y), temperature.solve_newton(z, y)
+    assert b.kkt_residual < 1e-9
+    assert a.objective == pytest.approx(b.objective, abs=1e-7)
+    np.testing.assert_allclose(a.weights, b.weights, atol=1e-4)
+    assert b.weights.sum() == pytest.approx(1.0) and b.temperature > 0
+
+
+def test_temperature_fusion_gives_noise_no_contribution() -> None:
+    # Plain simplex fusion parks weight on a near-constant stream to temper an overconfident
+    # one; with a free temperature that is unnecessary, so the noise stream's share vanishes.
+    from optlab.fusion import temperature
+
+    rng = np.random.default_rng(0)
+    y = rng.integers(0, 2, 400) * 2 - 1.0
+    z = np.column_stack([8 * (y + rng.normal(size=400)), 0.01 * rng.normal(size=400)])
+    plain = qp.solve(z, y)
+    calibrated = temperature.solve(z, y)
+    assert plain.weights[1] > 0.5  # the artefact seen in baseline_timit_v3
+    assert calibrated.contribution[1] < 0.01
+
+
+def test_temperature_fusion_is_bounded_on_separable_data() -> None:
+    from optlab.fusion import temperature
+
+    y = np.array([-1.0, -1.0, 1.0, 1.0])
+    z = np.column_stack([y * 3, np.zeros(4)])  # perfectly separable: loss alone has no minimiser
+    sol = temperature.solve(z, y)
+    assert np.isfinite(sol.temperature) and sol.kkt_residual < 1e-6
