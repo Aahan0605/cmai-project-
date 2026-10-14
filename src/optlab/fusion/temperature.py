@@ -8,6 +8,11 @@ substitution makes it convex in u. The small ridge `lam` keeps a minimiser when 
 is perfectly separable (the loss alone would push s to infinity).
 
 KKT: g_m + lam u_m - mu_m = 0, mu_m >= 0, mu_m u_m = 0 (no equality constraint, so no lambda).
+
+A stream whose logits are constant on val_fusion carries no information to rank clips; a
+weight on it only shifts every score by the same amount (an intercept), and that direction is
+nearly flat, which stalls both solvers. Such streams are fixed at u_m = 0 and the problem is
+solved over the informative streams; their contribution is 0 by definition.
 """
 
 from __future__ import annotations
@@ -105,14 +110,36 @@ def solve_newton(
 def solve(
     z: np.ndarray, y: np.ndarray, lam: float = 1e-3, tol: float = 1e-6
 ) -> TemperatureSolution:
-    """cvxpy first; projected Newton when cvxpy's own KKT residual misses `tol`."""
+    """cvxpy first; projected Newton when cvxpy's own KKT residual misses `tol`. Streams with
+    constant logits on these samples are held at u = 0 (see module docstring)."""
+    m = z.shape[1]
+    sd = z.std(axis=0)
+    keep = np.flatnonzero(sd > 1e-6 * max(float(sd.max()), 1e-300))
+    if len(keep) == 0:  # every head is constant: nothing to fuse, scores carry no ranking
+        uniform = np.full(m, 1 / m)
+        return TemperatureSolution(
+            "projected_gradient",
+            np.zeros(m),
+            uniform,
+            0.0,
+            uniform,
+            float(np.log(2)),
+            list(range(m)),
+            0.0,
+        )
+    zk = z[:, keep]
+    sol = None
     try:
-        sol = solve_cvxpy(z, y, lam)
-        if sol.kkt_residual <= tol:
-            return sol
+        sol = solve_cvxpy(zk, y, lam)
     except Exception:  # noqa: BLE001 - any solver failure falls through to Newton
         pass
-    sol = solve_newton(z, y, lam)
+    if sol is None or sol.kkt_residual > tol:
+        sol = solve_newton(zk, y, lam)
     if sol.kkt_residual > tol:
         raise RuntimeError(f"temperature fusion did not converge: {sol.kkt_residual:.1e}")
-    return sol
+    u = np.zeros(m)
+    u[keep] = sol.u
+    full = _finish(sol.solver, u, z, y, lam)
+    full.kkt_residual = sol.kkt_residual  # residual of the problem actually solved
+    full.active_set = sorted(set(range(m)) - set(keep[sol.u > 1e-10].tolist()))
+    return full

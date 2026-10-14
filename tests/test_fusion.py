@@ -110,3 +110,16 @@ def test_temperature_fusion_is_bounded_on_separable_data() -> None:
     z = np.column_stack([y * 3, np.zeros(4)])  # perfectly separable: loss alone has no minimiser
     sol = temperature.solve(z, y)
     assert np.isfinite(sol.temperature) and sol.kkt_residual < 1e-6
+
+
+def test_temperature_fusion_holds_constant_streams_at_zero() -> None:
+    # A head that outputs a constant (seen in cross-validation fold 0) would act as an
+    # intercept and stall the solvers; it must get zero weight and the solve must converge.
+    from optlab.fusion import temperature
+
+    rng = np.random.default_rng(0)
+    y = rng.integers(0, 2, 40) * 2 - 1.0
+    z = np.column_stack([1.5 * (y + rng.normal(size=40)), np.full(40, 3e-4), np.zeros(40)])
+    sol = temperature.solve(z, y)
+    assert sol.kkt_residual < 1e-6 and sol.u[1] == 0 and sol.u[2] == 0
+    assert sol.weights[0] == pytest.approx(1.0) and sol.contribution[0] == pytest.approx(1.0)
