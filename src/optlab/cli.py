@@ -256,6 +256,27 @@ def cmd_cv_stats(args: argparse.Namespace, name: str | None = None) -> None:
     print(f"wrote {out}")
 
 
+def cmd_export_snapshot(args: argparse.Namespace) -> None:
+    from optlab import config
+    from optlab.db.connection import connect
+    from optlab.export.snapshot import export_snapshot
+
+    conn = connect(args.db, readonly=True)
+    n = export_snapshot(conn, config.load_toy_experiment(args.toy_config), args.out)
+    conn.close()
+    print(f"wrote snapshot of {n} runs to {args.out}")
+
+
+def cmd_serve(args: argparse.Namespace) -> None:
+    import uvicorn
+
+    from optlab.api import create_app
+
+    uvicorn.run(
+        create_app(args.db, args.toy_config, args.cors_origin), host=args.host, port=args.port
+    )
+
+
 def cmd_stats(args: argparse.Namespace) -> None:
     from optlab.db.connection import connect
     from optlab.eval.report import write_stats
@@ -364,6 +385,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--db", default=DEFAULT_DB)
     p.add_argument("--out", type=Path)
     p.set_defaults(func=cmd_stats)
+
+    p = sub.add_parser("export-snapshot", help="static JSON for the dashboard's snapshot mode")
+    p.add_argument("--db", default=DEFAULT_DB)
+    p.add_argument("--toy-config", default="configs/experiments/toy.yaml")
+    p.add_argument("--out", type=Path, default=Path("frontend/public/data"))
+    p.set_defaults(func=cmd_export_snapshot)
+
+    p = sub.add_parser("serve", help="read-only results API (FastAPI)")
+    p.add_argument("--db", default=DEFAULT_DB)
+    p.add_argument("--toy-config", default="configs/experiments/toy.yaml")
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8000)
+    p.add_argument("--cors-origin", default="http://localhost:5173")
+    p.set_defaults(func=cmd_serve)
 
     p = sub.add_parser("toy", help="run optimizers on the toy benchmarks (resumable)")
     p.add_argument("--db", default=DEFAULT_DB)
