@@ -23,6 +23,7 @@ import numpy as np
 import torch
 
 from optlab.config import ExperimentConfig, ModelConfig, OptimizerConfig
+from optlab.db.connection import MIGRATIONS_DIR, schema_version
 from optlab.db.repository import (
     TestSplitAlreadyWritten,
     git_commit,
@@ -81,6 +82,12 @@ class Experiment:
         log: Any = print,
     ) -> None:
         self.conn, self.cfg, self.config_path, self.log = conn, cfg, config_path, log
+        latest = max([1] + [int(p.name.split("_")[0]) for p in MIGRATIONS_DIR.glob("*.sql")])
+        if schema_version(conn) < latest:
+            raise RuntimeError(
+                f"results DB is at schema v{schema_version(conn)}, code needs v{latest};"
+                " run `optlab init-db` to migrate"
+            )
         self.optimizers = optimizers
         self.model_cfg = models[cfg.model]
         if self.model_cfg.fusion_type != "weighted_sum":
