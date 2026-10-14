@@ -47,6 +47,16 @@ def test_qp_returns_inaccurate_optimum_for_caller_to_judge() -> None:
     assert projected_gradient.solve(z, y).kkt_residual < 1e-6
 
 
+@pytest.mark.parametrize("seed", range(5))
+def test_projected_gradient_handles_badly_scaled_logits(seed: int) -> None:
+    # Like a trained detector: one confident stream (large logits), two near-constant ones.
+    z, y = problem(seed)
+    z = z * np.array([7.0, 0.2, 0.01])
+    sol = projected_gradient.solve(z, y)
+    assert sol.kkt_residual < 1e-9
+    assert sol.objective <= qp.solve(z, y).objective + 1e-9
+
+
 def test_noise_modality_is_switched_off() -> None:
     z, y = problem(0)
     sol = qp.solve(z, y)
