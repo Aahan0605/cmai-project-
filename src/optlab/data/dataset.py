@@ -41,13 +41,21 @@ class FeatureDataset(Dataset[Item]):
         self.visual, self.frequency, self.audio = visual, frequency, audio
         self.items = [(v, f, row) for v, _, f, row in visual.index if v in labels]
         self.labels = [labels[v] for v, _, _ in self.items]
-        for vid, label, _, _ in visual.index:
-            if vid in labels and label != labels[vid]:
-                raise ValueError(f"label mismatch for {vid} between manifest and cache")
+        for cache in (visual, frequency, audio):
+            if cache is not None:
+                for vid, label, _, _ in cache.index:
+                    if vid in labels and label != labels[vid]:
+                        raise ValueError(f"label mismatch for {vid} between manifest and cache")
         self.freq_row = (
             {(v, f): row for v, _, f, row in frequency.index} if frequency is not None else None
         )
         self.audio_row = {v: row for v, _, _, row in audio.index} if audio is not None else None
+        if self.audio_row is not None:
+            if len(self.audio_row) != len(audio.index):
+                raise ValueError("audio cache must contain exactly one embedding per video")
+            missing_audio = {v for v, _, _ in self.items} - self.audio_row.keys()
+            if missing_audio:
+                raise ValueError(f"missing audio features, e.g. {sorted(missing_audio)[0]}")
         if self.freq_row is not None:
             missing = [(v, f) for v, f, _ in self.items if (v, f) not in self.freq_row]
             if missing:

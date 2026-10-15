@@ -16,7 +16,7 @@ Family = Literal[
 
 
 class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
 
 class SpaceDim(_Strict):
@@ -58,8 +58,8 @@ class ModelConfig(_Strict):
     fusion_type: Literal["concat_mlp", "weighted_sum", "svm_head"]
     backbone_frozen: bool = True
     unfrozen_last_n_layers: int = Field(0, ge=0)
-    head_hidden: int = 256
-    dropout: float = 0.2
+    head_hidden: int = Field(256, ge=1)
+    dropout: float = Field(0.2, ge=0, lt=1)
 
 
 class DatasetConfig(_Strict):
@@ -76,9 +76,9 @@ class SplitConfig(_Strict):
     """Identity-disjoint split fractions (by video count). Splits are never reseeded per run."""
 
     seed: int = 0
-    train: float = 0.7
-    val: float = 0.15
-    test: float = 0.15
+    train: float = Field(0.7, gt=0, lt=1)
+    val: float = Field(0.15, gt=0, lt=1)
+    test: float = Field(0.15, gt=0, lt=1)
     val_fusion_fraction: float = Field(0.5, ge=0.0, le=1.0)  # share of val used to fit fusion
 
     @model_validator(mode="after")
@@ -91,13 +91,13 @@ class SplitConfig(_Strict):
 class ExtractionConfig(_Strict):
     frames_per_video: int = Field(16, ge=1)
     face_margin: float = Field(0.3, ge=0.0)  # box grows by this fraction on each side
-    face_size: int = 224
+    face_size: int = Field(224, ge=1)
     face_detector: Literal["mtcnn"] = "mtcnn"
     visual_backbones: dict[str, dict[str, str]] = Field(default_factory=dict)
     audio_backbones: dict[str, dict[str, str]] = Field(default_factory=dict)
-    audio_sample_rate: int = 16000
-    freq_size: int = 128  # grayscale crop is resized to this before the FFT
-    freq_bins: int = 64
+    audio_sample_rate: int = Field(16000, ge=1)
+    freq_size: int = Field(128, ge=1)  # grayscale crop is resized to this before the FFT
+    freq_bins: int = Field(64, ge=1)
     shard_rows: int = Field(65536, ge=1)
 
 
@@ -161,7 +161,7 @@ class TrainingConfig(_Strict):
     max_epochs: int = Field(30, ge=1)
     batch_size: int = Field(256, ge=1)
     patience: int = Field(5, ge=1)  # early stopping on val_tune video AUC
-    clip_norm: float | None = None
+    clip_norm: float | None = Field(None, gt=0)
     schedule: Literal["constant"] = "constant"
 
 
@@ -180,13 +180,26 @@ class ExperimentConfig(_Strict):
     # 'simplex': w on the simplex (TRD 9). 'simplex_temperature': w on the simplex times a
     # learned temperature, so the weights no longer absorb logit scale (Gate 1 finding).
     fusion: Literal["simplex", "simplex_temperature"] = "simplex"
+    stream_calibration: bool = False
     fusion_ridge: float = Field(1e-3, ge=0.0)
-    cv_folds: int | None = Field(None, ge=2)  # set for `optlab cv` (grouped by identity)
+    cv_folds: int | None = Field(None, ge=3)  # set for `optlab cv` (grouped by identity)
     cv_seed: int = 0
     manifests_dir: str = "manifests"
     features_dir: str = "features"
     artifacts_dir: str = "artifacts"
     device: str = "cpu"
+
+    @model_validator(mode="after")
+    def _check(self) -> ExperimentConfig:
+        if not self.seeds or len(set(self.seeds)) != len(self.seeds):
+            raise ValueError("seeds must be non-empty and unique")
+        if not self.optimizers or len(set(self.optimizers)) != len(self.optimizers):
+            raise ValueError("optimizers must be non-empty and unique")
+        if self.eval.in_distribution in self.eval.cross_dataset:
+            raise ValueError("in-distribution dataset cannot also be a cross-dataset target")
+        if len(set(self.eval.cross_dataset)) != len(self.eval.cross_dataset):
+            raise ValueError("cross-dataset targets must be unique")
+        return self
 
 
 def _load(path: Path) -> dict[str, Any]:

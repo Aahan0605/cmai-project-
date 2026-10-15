@@ -1,314 +1,451 @@
-<div align="center">
-
 # OptLab-DF
 
-**Which optimizer trains the most robust multimodal deepfake detector, and can a hybrid do better?**
+**A reproducible optimizer benchmark for multimodal deepfake detection, with a results dashboard.**
 
 [![CI](https://github.com/Aahan0605/cmai-project-/actions/workflows/ci.yml/badge.svg)](https://github.com/Aahan0605/cmai-project-/actions/workflows/ci.yml)
-![Python 3.11](https://img.shields.io/badge/python-3.11-blue)
-![PyTorch](https://img.shields.io/badge/PyTorch-2.x-ee4c2c)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
+![React](https://img.shields.io/badge/React-TypeScript-149eca)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-*Innovative assignment · Computational Mathematics for AI & ML · B.Tech CSE-AIML, Nirma University*
+OptLab-DF asks: **how does optimizer choice affect convergence, stability, and generalization
+when every optimizer receives the same tuning budget?** It trains small detection heads on
+frozen visual, audio, and frequency features, evaluates them on held-out identities, and
+records the experiment in SQLite. A React dashboard makes the runs and uncertainty inspectable.
 
-<img src="results/toy/rosenbrock_trajectories.png" alt="Twelve optimizers on the Rosenbrock function: trajectories from the same start point to the minimum at (1, 1)" width="900">
-
-<sub>Twelve optimizers on the Rosenbrock valley from the same start. ◯ start · ★ end · ✕ minimum at (1, 1).</sub>
-
-</div>
-
----
+The project is a Computational Mathematics for AI & ML assignment at Nirma University.
+Optimization is the subject; deepfake detection is the experimental testbed. The interface
+is a research results explorer. Video-upload prediction is outside the implemented workflow.
 
 ## Contents
 
-- [The question](#the-question)
-- [Highlights](#highlights)
-- [How it works](#how-it-works)
-- [Phase 1 results: toy benchmarks](#phase-1-results-toy-benchmarks)
-- [Phase 2 results: optimizer baselines](#phase-2-results-optimizer-baselines)
-- [Gallery](#gallery)
-- [Quickstart](#quickstart)
-- [Project status and roadmap](#project-status-and-roadmap)
+- [What is implemented](#what-is-implemented)
+- [Quick start](#quick-start)
+- [System architecture](#system-architecture)
+- [How an experiment works](#how-an-experiment-works)
+- [Data and reproducibility](#data-and-reproducibility)
+- [Results](#results)
+- [Dashboard and API](#dashboard-and-api)
+- [Configuration and commands](#configuration-and-commands)
+- [Project status](#project-status)
 - [Repository layout](#repository-layout)
-- [Limitations and ethics](#limitations-and-ethics)
-- [References](#references)
+- [Development and testing](#development-and-testing)
+- [Troubleshooting](#troubleshooting)
+- [Limitations and responsible use](#limitations-and-responsible-use)
 
-## The question
+## What is implemented
 
-> When training a multimodal deepfake detector, how do different optimizers compare in
-> **convergence speed**, **stability** and, most importantly, **generalization to deepfakes
-> from unseen datasets**? Can a **hybrid optimizer** designed from those findings do better?
-
-Optimization is the subject of this project; deepfake detection is the testbed. Detectors
-score very high on the dataset they were trained on and degrade on unseen manipulations, and
-that generalization gap is where optimizer choice (and flat versus sharp minima) can plausibly
-matter.
-
-Most optimizer comparisons tune one optimizer harder than the rest, report a single seed and
-declare a winner. OptLab-DF is built to avoid that:
-
-- every optimizer gets the **same tuning budget**;
-- each configuration runs with **5 seeds**;
-- the **test set is written once** per run;
-- results are reported as **mean ± std with confidence intervals**;
-- a **null result counts as a finding**.
-
-## Highlights
-
-| | |
+| Component | What it does |
 |---|---|
-| **From-scratch optimizers** | SGD, Momentum, Nesterov, RMSProp and Adam written as `torch.optim.Optimizer` subclasses. Each matches PyTorch's own implementation within 1e-6 after 100 steps in float64. |
-| **Sharpness-aware minimization** | SAM as a wrapper around any base optimizer. Parameters are restored bit-exactly after the ascent step (tested). |
-| **Toy suite with known answers** | Ill-conditioned quadratics, Rosenbrock and Rastrigin, with Newton and L-BFGS as second-order references, on CPU in minutes. |
-| **Constrained fusion** *(Phase 2)* | Modality weights on the probability simplex, solved through the KKT conditions or a QP. |
-| **Honest by construction** | One SQLite results database; every table and plot in this README is generated from it. |
-| **Reproducible** | YAML configs, resumable runs, git commit recorded per experiment, a library-versions column per training run (filled from Phase 2), CI on every push. |
+| Optimizer library | From-scratch SGD, Momentum, NAG, RMSProp and Adam; AdamW, RAdam, AdaBelief and Lion integrations; a SAM wrapper |
+| Toy benchmarks | Ill-conditioned quadratics, Rosenbrock and Rastrigin; Newton and L-BFGS references |
+| Data pipeline | Identity-disjoint manifests, sampled face crops, frozen CLIP/wav2vec2 features, frequency spectrum, validated feature caches |
+| Experiment runner | Equal-budget random/grid/PSO/GA tuning, seeded training, class balancing, clipping, early stopping, best checkpoints, resumable sweeps |
+| Fusion | Optional per-stream calibration, simplex or scaled-simplex fusion, persisted transforms and KKT diagnostics |
+| Evaluation | Frame/video AUC, EER, accuracy, F1, AP, bootstrap intervals and Holm-corrected comparisons |
+| Grouped CV | Eight TIMIT folds, all 32 people tested once, seed-averaged comparisons paired by fold |
+| Results backend | Migrated SQLite schema, atomic writes, read-only FastAPI, conflict-detecting database merge, static snapshot export |
+| Frontend | Overview, convergence, generalization, fusion, CV, searchable runs, tuning, toy curves/trajectories, protocol, CSV exports and shareable links |
 
-## How it works
+## Quick start
 
-```mermaid
-flowchart LR
-    subgraph DATA["Datasets (access on request)"]
-        FF["FaceForensics++<br/>train / val / test"]
-        CD["Celeb-DF v2<br/>unseen test set"]
-        FA["FakeAVCeleb<br/>audio + video"]
-    end
-    subgraph PREP["Offline, once (GPU)"]
-        FACE["Face crop +<br/>16 frames per video"]
-        FEAT["Frozen backbones<br/>CLIP ViT-B/16 · wav2vec 2.0<br/>· frequency spectrum"]
-        CACHE[("Feature cache")]
-    end
-    subgraph CORE["optlab (CPU-friendly)"]
-        OPT["Optimizer registry<br/>10 optimizers + hybrid"]
-        TRAIN["Small heads +<br/>simplex-constrained fusion"]
-        EVAL["AUC · EER · bootstrap CIs<br/>Holm-corrected tests"]
-    end
-    DB[("results.db")]
-    OUT["Report · README ·<br/>dashboard"]
+### 1. Explore the existing results
 
-    FF --> FACE
-    CD --> FACE
-    FA --> FACE
-    FACE --> FEAT --> CACHE --> TRAIN
-    OPT --> TRAIN --> EVAL --> DB --> OUT
-```
-
-Heavy work (face cropping, feature extraction) happens once. Every optimizer comparison
-then trains only small heads on cached features, so 10 optimizers × 5 seeds × an equal
-tuning budget fits on a free GPU, or even a CPU.
-
-### Optimizers under study
-
-| Family | Optimizer | Implementation | Update |
-|---|---|---|---|
-| Plain | SGD | from scratch | θ ← θ − η g |
-| Momentum | SGD + Momentum | from scratch | v ← μv + g; θ ← θ − η v |
-| Momentum | Nesterov (NAG) | from scratch | v ← μv + g; θ ← θ − η (g + μv) |
-| Adaptive | RMSProp | from scratch | s ← ρs + (1−ρ)g²; θ ← θ − η g / (√s + ε) |
-| Adaptive | Adam | from scratch | bias-corrected first and second moments |
-| Adaptive | AdamW | `torch.optim` | Adam + decoupled weight decay |
-| Adaptive | RAdam | `torch.optim` | variance-rectified Adam |
-| Adaptive | AdaBelief | `adabelief-pytorch` | Adam with the "belief" (g − m)² as second moment |
-| Sign | Lion | `lion-pytorch` | sign of interpolated momentum |
-| Sharpness-aware | SAM (+ SGD-M) | in-repo wrapper | gradient at θ + ρ g/‖g‖, then base step |
-| Second-order | Newton, L-BFGS | in-repo / `torch.optim` | toy-benchmark references |
-| Hybrid | designed in Phase 3 | — | built only after the baseline analysis |
-
-## Phase 1 results: toy benchmarks
-
-Before any deepfake training, every optimizer runs on functions whose minima are known:
-
-- **Quadratic** ½xᵀAx with condition number κ ∈ {10, 100, 1000} and a rotated eigenbasis;
-- **Rosenbrock**, a narrow curved valley;
-- **Rastrigin**, with many local minima.
-
-Each optimizer runs 5 seeds from random starts. Its learning rate is picked from a grid on
-seed 0 and then reused for every seed.
-
-<p align="center">
-  <img src="results/toy/quadratic_scaling.png" alt="Median steps to tolerance versus condition number for each optimizer" width="720">
-</p>
-
-**Steps to tolerance**: median [min–max] over the seeds that converged (seeds converged /
-seeds run); "—" means no seed converged. The table is copied verbatim from
-[results/toy_summary.md](results/toy_summary.md), which `optlab toy-report` generates from the
-database.
-
-| optimizer | quadratic_k10 | quadratic_k100 | quadratic_k1000 | rosenbrock | rastrigin |
-|---|---|---|---|---|---|
-| sgd | 78 [56–82] (5/5) | 812 [582–850] (5/5) | 8153 [5841–8534] (5/5) | 14269 [13632–14676] (5/5) | — (0/5) |
-| sgd_momentum | 130 [122–161] (5/5) | 171 [138–171] (5/5) | 171 [138–204] (5/5) | 1624 [1441–2266] (3/5) | — (0/5) |
-| nag | 44 [34–44] (5/5) | 97 [24–98] (5/5) | 748 [538–782] (5/5) | 1452 [1432–1472] (2/5) | — (0/5) |
-| rmsprop | 89 [58–136] (5/5) | 5984 (1/5) | — (0/5) | — (0/5) | — (0/5) |
-| adam | 146 [101–169] (5/5) | 318 [133–500] (5/5) | 1544 [523–2091] (5/5) | 793 [499–1147] (4/5) | — (0/5) |
-| adamw | 146 [101–169] (5/5) | 318 [133–500] (5/5) | 1544 [523–2091] (5/5) | 793 [499–1147] (4/5) | — (0/5) |
-| radam | 133 [105–160] (5/5) | 1501 [386–1813] (5/5) | 8578 [3593–9493] (5/5) | 10558 [6430–10670] (3/5) | — (0/5) |
-| adabelief | 187 [93–189] (5/5) | 291 [141–449] (5/5) | 1461 [556–1933] (5/5) | 805.5 [566–1143] (4/5) | — (0/5) |
-| lion | 9009 [4969–9295] (3/5) | 7074 [5138–9010] (2/5) | — (0/5) | 3742 (1/5) | — (0/5) |
-| sam_sgd_momentum | 291 (1/5) | — (0/5) | — (0/5) | — (0/5) | — (0/5) |
-| newton | 1 [1–1] (5/5) | 1 [1–1] (5/5) | 1 [1–1] (5/5) | 4 [3–5] (5/5) |  |
-| lbfgs | 4 [3–7] (5/5) | 4 [3–8] (5/5) | 4 [3–8] (5/5) | 21 [19–26] (5/5) |  |
-
-**What the numbers show**
-- **Conditioning hurts plain gradient descent the most.** Its median steps grow about 10× for
-  every 10× in κ (78 → 812 → 8153), while momentum stays nearly flat (130 → 171 → 171).
-- **Second-order methods ignore conditioning on quadratics.** Newton converges in 1 step at
-  every κ, as theory says, and L-BFGS needs a median of 4.
-- **Lion, RMSProp and SAM mostly miss tight tolerances at a fixed learning rate.** Lion takes
-  fixed-size sign steps; RMSProp's step size does not shrink as the gradient does; and SAM's
-  ascent step keeps length ρ even near the minimum, so SAM with a fixed ρ cannot settle
-  exactly on it.
-- **No optimizer escapes Rastrigin's local minima.** No first-order run reached the global
-  minimum; the final value depends mainly on the start point.
-
-The selected learning rates, final values and the hypothesis written before these runs are in
-the [full summary](results/toy_summary.md).
-
-## Phase 2 results: optimizer baselines
-
-**Data.** FaceForensics++, Celeb-DF and FakeAVCeleb are available only on request, so Phase 2
-runs on **OptLab-TIMIT**, an open real/fake dataset assembled from VidTIMIT (real) and
-DeepfakeTIMIT (face swaps), both open access on Zenodo under CC BY-NC-ND 4.0. It has
-32 people with 10 real and 10 fake clips each, split by person. The test uses higher-quality
-fakes, and the "unseen" test uses lower-quality fakes of the same 4 held-out people. See the
-[dataset card](docs/datasets/optlab_timit.md) for construction, licences, citations and the two
-confounds found and removed along the way.
-
-**Protocol.** 10 optimizers, 20 tuning trials each, then 5 seeds at the selected
-hyperparameters: 50 runs, none diverged, 85 s of training in total on a laptop CPU.
-
-<p align="center">
-  <img src="results/baseline_timit_v3/convergence_val_auc.png" alt="Validation AUC per epoch, mean and spread over five seeds, for ten optimizers" width="720">
-</p>
-
-**Findings** (all from the results database; details in the
-[baseline analysis](docs/baseline_analysis.md)):
-- **No optimizer is distinguishable from another**: 0 of 45 pairs on either test after Holm
-  correction. On the in-distribution test, nine of the ten lie within 0.025 AUC of each other
-  (video AUC 0.748–0.773). This is a null result, limited by 5 seeds and 4 test people.
-- **Plain SGD is the weakest**: lowest mean on both tests (0.707 and 0.803) and the noisiest,
-  but not significantly worse.
-- **Lion reaches the convergence target fastest and most reliably** (5 of 5 seeds, median 3
-  epochs). Adaptive methods as a group are not consistently faster than SGD with momentum.
-- **The lower-quality fakes turned out easier** (every optimizer scores higher on them), so
-  this dataset cannot test generalization to *harder* unseen fakes.
-- **Simplex fusion weights are not stream importance.** An audio stream that is uninformative
-  by construction (AUC exactly 0.5 in every run) still gets an average weight of 0.35, because
-  the weights also absorb the visual head's overconfidence. The constrained solver itself is
-  exact (KKT residual < 1e-6 in all 50 runs).
-
-Full tables, with bootstrap CIs and pairwise tests: [results/baseline_timit_v3/summary.md](results/baseline_timit_v3/summary.md).
-
-## Gallery
-
-<table>
-  <tr>
-    <td width="50%"><img src="results/toy/quadratic_k1000_trajectories.png" alt="Trajectories on the kappa = 1000 quadratic"><br><sub><b>κ = 1000 quadratic.</b> SGD with momentum zig-zags across the narrow valley; Newton jumps straight to the minimum.</sub></td>
-    <td width="50%"><img src="results/toy/rosenbrock_curves.png" alt="Convergence curves on Rosenbrock"><br><sub><b>Rosenbrock convergence.</b> f(xₜ) − f* against steps (log scale), seed 0.</sub></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="results/toy/rastrigin_trajectories.png" alt="Trajectories on Rastrigin"><br><sub><b>Rastrigin.</b> Every first-order method stops in a local minimum, not the global one at the origin.</sub></td>
-    <td width="50%"><img src="results/toy/quadratic_k1000_curves.png" alt="Convergence curves on the kappa = 1000 quadratic"><br><sub><b>κ = 1000 convergence.</b> The dotted line is the 1e-8 tolerance.</sub></td>
-  </tr>
-</table>
-
-## Quickstart
-
-Requires [uv](https://docs.astral.sh/uv/). Python 3.11 is installed automatically.
+The checked-in snapshot works without Python, a GPU, datasets, or a running API.
+Install Node.js **22.12+** (Node 24 is used in CI) and **pnpm 10.28.1**, then:
 
 ```bash
 git clone https://github.com/Aahan0605/cmai-project-.git
 cd cmai-project-
-make setup   # install dependencies
-make test    # unit tests on CPU
-make toy     # rerun the toy suite; regenerates results/toy_summary.md and every plot (~6 min, CPU)
-
-# Phase 2 on open data (≈3.5 GB download, ≈35 min feature extraction on a laptop):
-uv sync --extra extract
-optlab fetch-timit && optlab prepare --dataset optlab_timit --root data/timit
-optlab extract --dataset optlab_timit_hq --backbone clip_vit_b16 --root data/timit   # likewise lq, wav2vec2_base
-optlab sweep --experiment baseline_timit_v3 && optlab stats --experiment baseline_timit_v3
+pnpm --dir frontend install --frozen-lockfile
+pnpm --dir frontend dev
 ```
 
-### Command-line interface
+Open **http://localhost:5173**. Select an experiment and a view in the sidebar. Choose
+**Cross-validation** on a calibrated fold to inspect all eight folds. **Toy benchmarks**
+shows the mathematical benchmarks; **Runs** and **Tuning** expose individual records.
+
+For a static production build:
 
 ```bash
-optlab init-db                                   # create results/results.db, load catalogues
-optlab toy [--force]                             # toy benchmarks (resumable)
-optlab toy-report                                # tables, plots and summary from the DB
-optlab prepare --dataset ff++ --root DATA/FF++   # identity-disjoint split manifests
-optlab extract --dataset ff++ --backbone clip_vit_b16 --root DATA/FF++ --device cuda
-optlab sweep --experiment baseline_v1           # tune -> train -> fuse -> evaluate, resumable
-optlab stats --experiment baseline_v1           # leaderboard, CIs, pairwise tests, gap, plots
-optlab evaluate --run-id 12 --final             # test splits are written once; --force is flagged
-optlab merge-db a.db b.db --out merged.db        # combine databases from separate GPU sessions
+pnpm --dir frontend build
+pnpm --dir frontend preview
 ```
 
-Feature extraction needs the optional extras (`uv sync --extra extract`) and a local copy of
-each dataset. FaceForensics++, Celeb-DF v2 and FakeAVCeleb are distributed by their authors on
-request; this repository only ever stores split manifests, never videos, frames or faces.
+Deploy the contents of `frontend/dist`. Relative asset paths support a repository subpath,
+and navigation uses query parameters. The production build does not include Vite's API proxy.
 
-## Project status and roadmap
+### 2. Set up the Python backend
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/). Run all Python commands
+from the repository root; configs and local artifact paths are resolved from that directory.
+
+```bash
+uv sync --frozen --extra api
+uv run optlab init-db
+uv run pytest
+uv run optlab serve
+```
+
+The API runs at **http://127.0.0.1:8000**; interactive docs are at
+**http://127.0.0.1:8000/api/docs**. In a second terminal:
+
+```bash
+VITE_DATA_MODE=api pnpm --dir frontend dev
+```
+
+`results/results.db` is a local generated file and is excluded from Git. A fresh `init-db`
+creates empty result tables and seeds the catalogues; it does **not** reconstruct historical
+runs from the committed JSON snapshot. The snapshot and reports remain available for browsing.
+To populate a new database without datasets, run:
+
+```bash
+uv run optlab toy
+uv run optlab toy-report
+uv run optlab export-snapshot
+```
+
+That final command replaces the dashboard snapshot with results from the selected database.
+Use `--out /tmp/optlab-demo-data` if you want a separate export. Toy optimization runs on CPU;
+its runtime depends on the machine and configuration. `make toy` additionally forces a rerun
+of existing toy results.
+
+For both runtimes together, `make setup` installs dependencies and `make check` runs checks.
+
+![Results dashboard](docs/assets/dashboard.png)
+
+## System architecture
 
 ```mermaid
 flowchart LR
-    P0["0 · Setup"]:::done --> P1["1 · Toy benchmarks"]:::done --> P2["2 · Baselines"]:::done
-    P2 --> G1{{"Gate 1<br/>baseline analysis"}}:::next --> P3["3 · Hybrid design"] --> G2{{"Gate 2<br/>design frozen"}}
-    G2 --> P4["4 · Hybrid evaluation<br/>+ ablations"] --> P5["5 · Dashboard + report"]
-    classDef done fill:#047857,color:#fff,stroke:#047857
-    classDef next fill:#1D4ED8,color:#fff,stroke:#1D4ED8
+    DATA["Local licensed videos and audio"]
+    CFG["YAML configs + identity manifests"]
+    PREP["Sample frames → face crops → frozen feature extraction"]
+    CACHE[("Feature shards and indices")]
+    TRAIN["Equal-budget tuning + seeded head training"]
+    CAL["Stream calibration on val_tune"]
+    FUSE["Constrained fusion on val_fusion"]
+    EVAL["Held-out frame/video evaluation"]
+    DB[("SQLite results.db")]
+    QUERY["Shared Python query layer"]
+    API["Read-only FastAPI"]
+    SNAP["Static JSON snapshot"]
+    WEB["React / TypeScript dashboard"]
+    REPORT["CSV + Markdown + PNG reports"]
+    DATA --> PREP --> CACHE --> TRAIN --> CAL --> FUSE --> EVAL --> DB
+    CFG --> PREP
+    CFG --> TRAIN
+    TRAIN --> DB
+    FUSE --> DB
+    DB --> QUERY
+    QUERY --> API --> WEB
+    QUERY --> SNAP --> WEB
+    DB --> REPORT
 ```
 
-| Phase | Content | State |
-|---|---|---|
-| 0 Setup | Configs, results database (schema v2), data pipeline | ✅ Done |
-| 1 Toy benchmarks | Optimizers checked against known minima | ✅ Done |
-| 2 Baselines | Equal-budget tuning, 5 seeds, in-distribution + unseen-fake tests | ✅ Done on OptLab-TIMIT ([analysis](docs/baseline_analysis.md)); FF++ / Celeb-DF still pending access |
-| 3 Hybrid design | Update rule motivated by the Phase 2 findings; frozen before testing | Planned |
-| 4 Hybrid evaluation | Same budget and seeds as the baselines, plus ablations | Planned |
-| 5 Presentation | Read-only API and results dashboard | Planned |
+The Python pipeline produces results offline. The frontend consumes the same JSON contract
+from either the API or a static snapshot. API requests open SQLite read-only, and the frontend
+has no write or training endpoint.
 
-The hybrid optimizer is designed only after the baselines are analysed, and its design is
-committed before it ever sees a test split, so it cannot be tuned against the benchmark it is
-judged on. A hybrid that turns out *not* to beat the baselines will be reported with the same
-prominence.
+See [the detailed architecture](docs/ARCHITECTURE.md) for the module map, training sequence,
+ER diagram, fusion formulation, API contract, failure recovery, and deployment boundaries.
+
+## How an experiment works
+
+1. **Prepare identities and splits.** Every face-swap target and donor belongs to a connected
+   identity component. Whole components stay in one training, tuning, fusion, or test role.
+   Manifests are checked for duplicate videos and identity leakage.
+2. **Extract features once.** CLIP ViT-B/16 encodes face crops, wav2vec 2.0 encodes available
+   audio, and a radial frequency spectrum supplies a third stream. Features are stored as
+   float16 NPY shards with indices and preprocessing metadata. Caches publish after completion.
+3. **Tune fairly.** Every optimizer gets the same number of trials and shortened training
+   budget. Diverged trials count. Validation-tuning video AUC selects hyperparameters and
+   the checkpoint; final training repeats the chosen settings over five seeds.
+4. **Calibrate and fuse.** If enabled, fit positive stream scales on `val_tune`, then freeze
+   them. Fit nonnegative mixing weights on `val_fusion`. Scaled-simplex fusion also learns
+   a shared logit scale. The solver verifies a KKT residual below `1e-6`.
+5. **Evaluate once.** Thresholds come from validation. The selected checkpoint, calibration,
+   and fusion parameters are reused for the configured in-distribution and cross-dataset tests.
+   Test writes require an explicit, flagged override to replace existing results.
+6. **Report uncertainty.** Show seed counts, means, standard deviations, bootstrap intervals,
+   and adjusted statistical tests. CV first averages seeds within a fold and compares optimizers
+   paired by fold. No detected difference does not establish equivalence.
+
+The heads minimize the sum of binary cross-entropy across streams. Frozen backbones make
+optimizer comparisons cheaper, while also limiting conclusions to head training. Calibration
+reduces scale confounding; mixing weights still reflect redundancy and validation sampling,
+so they do not measure causal stream importance. `val_tune` is reused for several selection
+steps, so its calibration loss is a fit diagnostic rather than independent validation evidence.
+
+## Data and reproducibility
+
+### OptLab-TIMIT: the completed local study
+
+OptLab-TIMIT combines VidTIMIT real recordings with DeepfakeTIMIT swaps. It retains the
+**32 face-swapped people in 16 pairs**, with 10 real and 10 fake clips per person per quality.
+HQ and LQ manifests each contain 640 videos. Reals and fakes receive matching encoding
+passes, and fake audio is aligned with its original real audio to reduce label shortcuts.
+See the [dataset card](docs/datasets/optlab_timit.md) for construction, caveats, sources and terms.
+
+To reproduce from source data, install the optional extraction dependencies. Pretrained models
+are downloaded on first use. Video standardization requires an OpenCV build with H.264 encoding;
+FFmpeg on `PATH` is needed when decoding audio from videos without sibling WAV files.
+
+```bash
+uv sync --frozen --extra api --extra extract
+uv run optlab init-db
+uv run optlab fetch-timit
+uv run optlab prepare --dataset optlab_timit --root data/timit
+
+# Visual extraction also writes the frequency stream.
+uv run optlab extract --dataset optlab_timit_hq --backbone clip_vit_b16 --root data/timit
+uv run optlab extract --dataset optlab_timit_lq --backbone clip_vit_b16 --root data/timit
+uv run optlab extract --dataset optlab_timit_hq --backbone wav2vec2_base --root data/timit
+uv run optlab extract --dataset optlab_timit_lq --backbone wav2vec2_base --root data/timit
+
+uv run optlab cv --experiment calibrated_timit_cv
+uv run optlab export-snapshot
+```
+
+`--device cuda` or `--device mps` selects an extraction backbone device; `--detector-device`
+selects the face detector device. Experiment YAML `device` controls head training. CPU is the
+routine test target; accelerators need compatible PyTorch hardware and dependencies.
+
+Keep raw media, crops, feature arrays and checkpoints local. Dataset terms are separate from
+the repository's MIT code licence. Downloads, extraction, and the full sweep need additional
+storage and time. Existing caches are protected from accidental overwrite; choose a new
+feature root after changing preprocessing.
+
+### External evaluation: access still required
+
+[calibrated_external.yaml](configs/experiments/calibrated_external.yaml) trains visual and
+frequency heads on **FaceForensics++** and tests them on **Celeb-DF v2**. This experiment has
+no results yet. Obtain the datasets from their authors and respect their access conditions.
+
+```bash
+uv run optlab prepare --dataset ff++ --root /path/to/FaceForensics++
+uv run optlab prepare --dataset celeb-df --root /path/to/Celeb-DF-v2
+uv run optlab extract --dataset faceforensics_pp --backbone clip_vit_b16 --root /path/to/FaceForensics++
+uv run optlab extract --dataset celeb_df_v2 --backbone clip_vit_b16 --root /path/to/Celeb-DF-v2
+uv run optlab sweep --experiment calibrated_external
+uv run optlab stats --experiment calibrated_external
+```
+
+The parsers have layout tests using synthetic fixtures; real-download verification awaits access.
+The external config uses visual and frequency streams because audio is not assumed available.
+FakeAVCeleb has a dataset catalogue entry but no verified preparation parser yet.
+
+## Results
+
+### Calibrated grouped cross-validation
+
+The completed study contains **400 runs: 8 folds × 10 optimizers × 5 seeds**. Each fold holds
+out two swap pairs (four people), uses the next fold for separate tuning/fusion roles, and
+trains on the remaining folds. All 32 people are tested exactly once.
+
+| optimizer | folds | AUC mean ± sd over folds | 95% CI |
+|---|---|---|---|
+| lion | 8 | 0.6789 ± 0.1019 | [0.6099, 0.7412] |
+| adabelief | 8 | 0.6777 ± 0.1062 | [0.6055, 0.7440] |
+| adamw | 8 | 0.6738 ± 0.0990 | [0.6067, 0.7340] |
+| adam | 8 | 0.6637 ± 0.1113 | [0.5888, 0.7311] |
+| sgd_momentum | 8 | 0.6626 ± 0.0913 | [0.6046, 0.7250] |
+| radam | 8 | 0.6621 ± 0.1029 | [0.5952, 0.7269] |
+| nag | 8 | 0.6587 ± 0.0877 | [0.6009, 0.7136] |
+| rmsprop | 8 | 0.6346 ± 0.0661 | [0.5915, 0.6769] |
+| sgd | 8 | 0.6123 ± 0.0632 | [0.5726, 0.6530] |
+| sam_sgd_momentum | 8 | 0.5724 ± 0.0760 | [0.5264, 0.6237] |
+
+Video AUC on HQ, averaged over seeds within each fold and then across folds. The table is
+copied from the [generated CV report](results/calibrated_timit_cv/summary.md).
+**No optimizer pair passes both the interval and Holm-adjusted significance criteria** on
+HQ or LQ (0 of 45 pairs for each dataset). Ordering these means does not establish a winner.
+The lower-quality shift uses the same held-out people and is easier in these measurements;
+it does not establish performance on unseen generators. Shared training data across folds
+limits independence.
+
+![Cross-validated test AUC](results/calibrated_timit_cv/cv_auc.png)
+
+### Earlier studies
+
+- [Toy benchmark summary](results/toy_summary.md): known minima, steps to tolerance,
+  selected learning rates, and limitations. Newton/L-BFGS are toy references.
+- [Single-split baseline results](results/baseline_timit_v3/summary.md): five seeds on four
+  test people, before stream calibration and rotating held-out identities.
+- [Baseline analysis](docs/baseline_analysis.md): detected audio/identity shortcuts,
+  superseded experiment history, and the motivation for calibration and broader testing.
+
+![Toy conditioning study](results/toy/quadratic_scaling.png)
+
+## Dashboard and API
+
+| View | Purpose |
+|---|---|
+| Overview | Run coverage, video test AUC, intervals, CSV and pairwise comparisons |
+| Convergence | Training/validation curves; early stopping can change replicate counts per epoch |
+| Generalization | Matched-seed in-distribution vs comparison AUC, separately by dataset |
+| Fusion | Stream weights, calibration NLL/scales and solver residuals |
+| Cross-validation | Seed-averaged fold statistics and paired comparisons |
+| Runs | Search/filter, selected run details, hyperparameters, evaluations, raw metadata and CSV |
+| Tuning | Every recorded trial, selected hyperparameters, divergence and validation scores |
+| Toy benchmarks | Objective curves, available 2D trajectories, per-seed outcomes and CSV |
+| Protocol | Split roles, calibration and outstanding external evaluation |
+
+Views and run selection use URL query parameters, for example
+`?view=Runs&experiment=7&run=202`. The IDs depend on your database. Browser Back/Forward works;
+theme choice is saved locally. API queries refresh every 15 seconds. Snapshots update when
+exported; use Refresh after exporting.
+
+Useful endpoints are `GET /api/meta`, `/api/experiments`, `/api/optimizers`,
+`/api/experiments/{id}/leaderboard`, `/api/experiments/{id}/generalisation`,
+`/api/experiments/{id}/tuning`, `/api/runs/{id}`, `/api/cv/{base}`, and `/api/toy`.
+The backend uses British spelling `generalisation`; the UI label is Generalization.
+Full schemas are at `/api/docs`.
+
+For a separately hosted live API, set `VITE_API_BASE_URL=https://your-api.example` at frontend
+build time and pass the actual frontend origin to `optlab serve --cors-origin`. These are
+public configuration values, not secrets. The API has no authentication and binds to localhost
+by default; see [SECURITY.md](SECURITY.md) before exposing it on a network.
+
+## Configuration and commands
+
+| Path | Controls |
+|---|---|
+| `configs/experiments/*.yaml` | Datasets, optimizer set, seeds, tuning/training budgets, fusion, paths and device |
+| `configs/optim/*.yaml` | Fixed optimizer settings and search spaces |
+| `configs/model/*.yaml` | Frozen backbone IDs, active streams, head size and dropout |
+| `configs/data/extraction.yaml` | Sampling, cropping, backbones, spectrum and cache shards |
+| `configs/data/splits.yaml` | Split fractions, seed and validation-fusion share |
+| `manifests/*.csv` | Video IDs/paths, labels, target/donor identities and split roles |
+
+Configs reject unknown fields, non-finite numbers and invalid budgets. The cached-feature
+trainer supports frozen backbones with weighted-sum fusion. Concat-MLP, SVM fusion and
+backbone fine-tuning are future model variants and fail explicitly if requested.
+
+Use a **new experiment name and config** when changing scientific settings. Run keys identify
+an experiment/optimizer/model/seed; they do not fingerprint all mutable configs and inputs.
+Resuming is safe only when the original experiment and caches are unchanged.
+
+```bash
+uv run optlab --help
+uv run optlab tune --experiment baseline_timit_v3 --optimizer adam
+uv run optlab train --experiment baseline_timit_v3 --optimizer adam --seed 0
+uv run optlab sweep --experiment baseline_timit_v3
+uv run optlab cv --experiment calibrated_timit_cv --prepare-only
+uv run optlab cv-stats --experiment calibrated_timit_cv
+uv run optlab fuse --run-id 12
+uv run optlab evaluate --run-id 12 --final
+uv run optlab merge-db session-a.db session-b.db --out merged.db
+uv run optlab export-snapshot --db merged.db --out /tmp/merged-snapshot
+```
+
+`--config /path/to/experiment.yaml` can replace `--experiment`. Run commands from the repo
+root so stored config and artifact paths resolve. Merging databases remaps IDs and detects
+conflicting results; it does not copy artifact files. Move checkpoints/trajectories separately.
+`evaluate --force` overwrites and flags test metrics; fusion cannot be refitted after testing.
+
+## Project status
+
+| Area | Status |
+|---|---|
+| Optimizer maths and toy suite | Implemented and tested |
+| TIMIT data preparation and features | Implemented; dataset card documents construction caveats |
+| Single-split baselines | Completed; superseded runs preserved |
+| Calibrated grouped CV | Completed: 400 runs, eight folds, all 32 people |
+| Results API and static export | Implemented; schema v4; shared contract tests |
+| Frontend and CI | Implemented; Python/frontend checks, build and fresh-DB smoke test |
+| FF++ → Celeb-DF | Configured; blocked on author-granted dataset access and real-layout verification |
+| FakeAVCeleb | Catalogue only; parser and dataset-backed study pending |
+| Hybrid optimizer and ablations | Research work pending: write/freeze a design, validate it, then evaluate on an untouched test |
+| Concat/SVM heads and backbone fine-tuning | Future model variants; outside the current cached-head pipeline |
+
+The existing baseline study found weak evidence of optimizer superiority. A hybrid designed
+from these observations must be framed as exploratory, and new confirmatory claims need a
+fresh evaluation. The planning documents describe intended research scope, not completed work.
 
 ## Repository layout
 
-```
-configs/            YAML: optimizer search spaces, models, datasets, splits, experiments
+```text
+.github/workflows/       Python + frontend CI
+backend/schema.sql       Base SQLite schema
+configs/                 Experiments, models, optimizers, extraction and splits
+docs/                    Architecture, specifications, analysis and dataset card
+manifests/               Identity-disjoint CSV splits, including generated CV folds
 src/optlab/
-  optim/            from-scratch optimizers, SAM wrapper, registry
-  toy/              benchmark functions, runner, report and plots
-  data/             manifests, face crop, frame sampling, extractors, feature cache, dataset
-  db/               SQLite connection, migrations, repository, merge
-  models/           per-modality heads with late fusion
-  train/            trainer (clipping, early stopping, divergence), in-memory splits
-  tune/             equal-budget random / grid / PSO / GA search
-  fusion/           simplex fusion: cvxpy QP, KKT closed form, projected gradient
-  eval/             metrics, bootstrap CIs, Holm-corrected tests, stats report
-  pipeline.py       tune -> train -> fuse -> evaluate -> sweep, recorded in the DB
-  cli.py            the `optlab` command
-backend/schema.sql  results database schema (migrations in src/optlab/db/migrations/)
-results/            generated toy summary, tables and plots
-tests/              pytest suite (CPU only, no datasets needed)
-docs/               PRD, TRD, architecture and dashboard design
+  data/                  Preparation, crops, extraction, feature cache and datasets
+  optim/                 Optimizer implementations and registry
+  models/ train/ tune/   Heads, training loop and equal-budget search
+  fusion/                Calibration, constrained solvers and KKT checks
+  eval/                  Metrics, statistics and report generation
+  db/                    Connections, migrations, repository and merge
+  export/                Shared queries and static snapshot generation
+  toy/                   Known-minimum objectives, runner and plots
+  api.py cli.py          Read-only HTTP API and command-line entry point
+frontend/
+  src/                   React views, shared data layer and frontend tests
+  public/data/           Committed JSON snapshot of recorded results
+results/                 Committed reports/plots; results.db stays local
+tests/                   Python unit, integration and contract tests
 ```
 
-The design documents explain the reasoning in depth. [docs/PRD.md](docs/PRD.md) covers the
-goals, protocol and how each part maps to the syllabus; [docs/TRD.md](docs/TRD.md) is the
-technical specification; [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) has the diagrams.
+## Development and testing
 
-## Limitations and ethics
+```bash
+make setup
+make check                  # lint/format checks, Python + frontend tests, production build
+make dev                    # snapshot frontend
+make api                    # read-only API
+make snapshot               # export the chosen local results DB
+make cv                     # calibrated TIMIT grouped sweep; needs feature caches
+```
 
-- **Frozen backbones.** Findings may not transfer to full fine-tuning; Phase 4 includes a
-  limited "unfreeze the last layers" check.
-- **Audio.** FaceForensics++ and Celeb-DF have no audio. Without FakeAVCeleb the detector is
-  multi-stream (visual + frequency) rather than truly multimodal.
-- **Toy tuning.** Learning rates are chosen on seed 0 and reused, so seed 0 is not held out.
-  Some momentum runs diverge on Rosenbrock at other seeds because of this.
-- **Detection only.** This repository contains no generation code. Deepfake detectors can
-  fail on unseen generators and must never be the only evidence about a real person's media.
+Individual checks:
+
+```bash
+uv run ruff check src tests
+uv run ruff format --check src tests
+uv run pytest
+pnpm --dir frontend format:check
+pnpm --dir frontend test
+pnpm --dir frontend build
+```
+
+Tests use synthetic features and dataset-layout fixtures, including API/snapshot parity,
+write-once evaluation, solver regressions, optimizer reference checks, cache corruption,
+identity leakage, merge conflicts, CLI validation, and frontend navigation/error cases.
+Optional OpenCV-dependent tests skip if OpenCV is absent. External data and GPU execution
+require their own validation. See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution and
+result-integrity rules. The [development review](docs/DEVELOPMENT_REVIEW.md) records the
+fixed failures, verification scope, and remaining work.
+
+## Troubleshooting
+
+| Symptom | Action |
+|---|---|
+| `optlab: command not found` | Use `uv run optlab …` from the repository root |
+| Schema mismatch or missing tables | Run `uv run optlab init-db --db YOUR_DB` with this checkout; back up valuable databases before migrating |
+| Live dashboard has no historical results | A new DB is empty; switch to the checked-in snapshot or reproduce/import the intended runs |
+| Snapshot returns HTML / missing JSON | Export from the intended DB; ensure `frontend/dist/data` is deployed; select the correct data mode |
+| `/api` fails in production | Vite's proxy is development-only; configure a reverse proxy or `VITE_API_BASE_URL` and CORS |
+| Missing feature/audio rows | Extract every active stream for the target dataset; verify matching video IDs and frame indices |
+| Existing cache is refused | Use a new feature directory after changing extraction; do not mix partial or differently processed shards |
+| OpenCV cannot write H.264 | Use an OpenCV/FFmpeg environment with an H.264 encoder before building TIMIT clips |
+| Node engine or pnpm lockfile error | Use the documented Node/pnpm versions and `--frozen-lockfile` |
+| Missing toy trajectory | Numerical records can be viewed; original NPZ artifacts are local and may not be available on another machine |
+| CV counts differ across optimizers | The sweep may be partial or contain failed/diverged runs; inspect coverage before drawing conclusions |
+
+## Limitations and responsible use
+
+- Frozen-backbone head training does not establish results for end-to-end model fine-tuning.
+- TIMIT contains older face swaps, frontal recordings, and a small identity population.
+  The HQ-to-LQ shift does not measure unseen-generator generalization.
+- Five seeds describe initialization variability. Eight overlapping training folds provide
+  broader identity coverage, but dependent folds limit statistical interpretation.
+- Calibration and checkpoint selection share `val_tune`; those fit metrics are optimistic.
+- Encoding/audio normalization reduces known shortcuts without proving all shortcuts are gone.
+- This research detector is not evidence about a person's honesty or the authenticity of
+  arbitrary real-world media. Do not use its scores for consequential decisions about people.
+- Dataset permissions apply separately to code. Do not redistribute raw recordings, derived
+  faces/audio, caches or checkpoints without verifying the relevant terms.
 
 ## References
 
@@ -326,4 +463,5 @@ technical specification; [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) has the di
 
 ## License
 
-[MIT](LICENSE) © 2026 Aahan Ajay Gajera
+Code: [MIT](LICENSE) © 2026 Aahan Ajay Gajera. Dataset and pretrained-model terms remain
+those of their respective authors.

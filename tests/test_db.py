@@ -72,7 +72,7 @@ def conn(root: Path, tmp_path: Path) -> sqlite3.Connection:
 def test_init_is_idempotent(root: Path, tmp_path: Path) -> None:
     make_db(root, tmp_path / "r.db").close()
     c = make_db(root, tmp_path / "r.db")
-    assert c.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert c.execute("PRAGMA user_version").fetchone()[0] == 4
     assert c.execute("SELECT COUNT(*) FROM optimizers").fetchone()[0] == 12
 
 
@@ -80,10 +80,10 @@ def test_migration_upgrades_v1_database(root: Path, tmp_path: Path) -> None:
     conn = connect(tmp_path / "v1.db")
     conn.executescript((root / "backend" / "schema.sql").read_text())  # a pre-migration DB
     assert "library_versions_json" not in columns(conn, "runs")
-    assert init_schema(conn, root / "backend" / "schema.sql") == 3
+    assert init_schema(conn, root / "backend" / "schema.sql") == 4
     assert "library_versions_json" in columns(conn, "runs")
-    assert {"formulation", "temperature"} <= set(columns(conn, "fusion_solves"))
-    assert init_schema(conn, root / "backend" / "schema.sql") == 3  # re-run is a no-op
+    assert {"formulation", "temperature", "calibration_json"} <= set(columns(conn, "fusion_solves"))
+    assert init_schema(conn, root / "backend" / "schema.sql") == 4  # re-run is a no-op
 
 
 @pytest.mark.parametrize(
@@ -207,3 +207,87 @@ def test_merge_conflict_raises_and_leaves_no_output(root: Path, tmp_path: Path) 
     with pytest.raises(MergeConflict):
         merge_databases([tmp_path / "a.db", tmp_path / "b.db"], tmp_path / "m.db")
     assert not (tmp_path / "m.db").exists()
+
+
+def test_readonly_paths_escape_uri_reserved_characters(tmp_path):
+    path = tmp_path / "results?#.db"
+    conn = connect(path)
+    conn.execute("CREATE TABLE example (id INTEGER)")
+    conn.commit()
+    conn.close()
+    readonly = connect(path, readonly=True)
+    assert readonly.execute("SELECT COUNT(*) FROM example").fetchone()[0] == 0
+    with pytest.raises(sqlite3.OperationalError, match="readonly"):
+        readonly.execute("INSERT INTO example VALUES (1)")
+    readonly.close()
+
+
+def test_invalid_forced_evaluation_preserves_previous_row(conn):
+    run = add_run(conn, 0)
+    write_evaluation(conn, eval_row(conn, run, 0.8))
+    with pytest.raises(sqlite3.IntegrityError):
+        write_evaluation(conn, eval_row(conn, run, 1.5), force=True)
+    assert conn.execute("SELECT auc FROM evaluations").fetchone()[0] == 0.8
+
+
+def test_merge_detects_changed_children_of_otherwise_identical_runs(root, tmp_path):
+    for name, auc in [("a.db", 0.8), ("b.db", 0.9)]:
+        conn = make_db(root, tmp_path / name)
+        write_evaluation(conn, eval_row(conn, add_run(conn, 0), auc))
+        conn.commit()
+        conn.close()
+    with pytest.raises(MergeConflict):
+        merge_databases([tmp_path / "a.db", tmp_path / "b.db"], tmp_path / "merged.db")
+    assert not (tmp_path / "merged.db").exists()
+
+
+def test_failed_migration_rolls_back_ddl(conn, tmp_path, root):
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    (migrations / "005_bad.sql").write_text(
+        "ALTER TABLE runs ADD COLUMN unexpected TEXT; SELECT * FROM missing_table;"
+    )
+    with pytest.raises(sqlite3.OperationalError):
+        init_schema(conn, root / "backend/schema.sql", migrations)
+    assert "unexpected" not in columns(conn, "runs")
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+
+
+def test_generalization_uses_paired_seeds_and_keeps_datasets_separate(conn):
+    from optlab.export.queries import generalisation
+
+    ids = {}
+    for seed, auc in [(0, 0.9), (1, 0.5)]:
+        run = ids[seed] = add_run(conn, seed)
+        row = eval_row(conn, run, auc)
+        row.update(
+            eval_dataset_id=id_of(conn, "datasets", "faceforensics_pp"), protocol="in_distribution"
+        )
+        write_evaluation(conn, row)
+        other = eval_row(conn, run, auc - 0.1)
+        other["eval_dataset_id"] = id_of(conn, "datasets", "optlab_timit_lq")
+        write_evaluation(conn, other)
+    write_evaluation(conn, eval_row(conn, ids[0], 0.3))
+    rows = generalisation(conn, id_of(conn, "experiments", "baseline_test"))["rows"]
+    by_dataset = {r["dataset"]: r for r in rows}
+    celeb = by_dataset["celeb_df_v2"]
+    assert celeb["n"] == 1 and celeb["in_mean"] == 0.9
+    assert celeb["gap_mean"] == pytest.approx(0.6)
+    lq = by_dataset["optlab_timit_lq"]
+    assert lq["n"] == 2 and lq["gap_mean"] == pytest.approx(0.1)
+
+
+def test_merge_rolls_back_catalogue_inserts_before_a_conflict(root, tmp_path):
+    from optlab.db.merge import merge_into
+
+    a, b = make_db(root, tmp_path / "a.db"), make_db(root, tmp_path / "b.db")
+    add_run(a, 0)
+    add_run(b, 0, best_epoch=99)
+    upsert_experiment(b, "extra", "baseline", None, None, None)
+    a.commit()
+    b.commit()
+    with pytest.raises(MergeConflict):
+        merge_into(a, b)
+    assert a.execute("SELECT 1 FROM experiments WHERE name='extra'").fetchone() is None
+    a.close()
+    b.close()

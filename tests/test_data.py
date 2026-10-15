@@ -209,3 +209,52 @@ def test_extract_then_feature_dataset(tmp_path: Path) -> None:
     weights = balanced_sampler(ds, torch.Generator()).weights
     labels = torch.tensor(ds.labels)
     assert weights[labels == 0].sum() == pytest.approx(weights[labels == 1].sum())
+
+
+@pytest.mark.parametrize("values", [np.array([[np.inf]]), np.array([[1e10]]), np.array([1.0])])
+def test_cache_rejects_invalid_features_without_publishing(tmp_path, values):
+    out = tmp_path / "invalid"
+    writer = FeatureCacheWriter(out)
+    with pytest.raises(ValueError):
+        writer.add("v", 1, [0], values)
+    assert not out.exists()
+
+
+def test_cache_rejects_duplicates_and_missing_shards(tmp_path):
+    out = tmp_path / "cache"
+    writer = FeatureCacheWriter(out, shard_rows=1)
+    writer.add("v", 1, [0], np.ones((1, 2)))
+    with pytest.raises(ValueError, match="duplicate"):
+        writer.add("v", 1, [0], np.ones((1, 2)))
+    writer.close({})
+    (out / "shard_00000.npy").unlink()
+    with pytest.raises(ValueError, match="shards"):
+        FeatureCache(out)
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        [VideoRow("v", "", 0, "real", "a", "train"), VideoRow("v", "", 1, "fake", "b", "test")],
+        [VideoRow("v", "", 0, "real", "a", "train"), VideoRow("w", "", 1, "fake", "a+b", "test")],
+        [
+            VideoRow("v", "", 0, "real", "a", "val", "tune"),
+            VideoRow("w", "", 1, "fake", "a+b", "val", "fusion"),
+        ],
+    ],
+)
+def test_manifest_rejects_duplicate_videos_and_identity_leakage(tmp_path, rows):
+    path = tmp_path / "manifest.csv"
+    write_manifest(rows, path)
+    with pytest.raises(ValueError):
+        read_manifest(path)
+
+
+def test_cache_rejects_reordered_shard_numbering(tmp_path):
+    out = tmp_path / "cache"
+    writer = FeatureCacheWriter(out, shard_rows=1)
+    writer.add("v", 1, [0, 1], np.array([[1.0, 2.0], [3.0, 4.0]]))
+    writer.close({})
+    (out / "shard_00000.npy").rename(out / "shard_00002.npy")
+    with pytest.raises(ValueError, match="numbering"):
+        FeatureCache(out)

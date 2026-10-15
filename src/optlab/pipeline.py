@@ -23,7 +23,7 @@ import numpy as np
 import torch
 
 from optlab.config import ExperimentConfig, ModelConfig, OptimizerConfig
-from optlab.db.connection import MIGRATIONS_DIR, schema_version
+from optlab.db.connection import require_current_schema
 from optlab.db.repository import (
     TestSplitAlreadyWritten,
     git_commit,
@@ -34,7 +34,7 @@ from optlab.db.repository import (
     write_evaluation,
 )
 from optlab.eval.metrics import detection_metrics, eer_and_threshold, video_scores
-from optlab.fusion import kkt_closed_form, projected_gradient, qp, temperature
+from optlab.fusion import calibration, kkt_closed_form, projected_gradient, qp, temperature
 from optlab.models.heads import LateFusion, modalities
 from optlab.train.data import Split, load_split
 from optlab.train.trainer import build_model, train
@@ -82,14 +82,11 @@ class Experiment:
         log: Any = print,
     ) -> None:
         self.conn, self.cfg, self.config_path, self.log = conn, cfg, config_path, log
-        latest = max([1] + [int(p.name.split("_")[0]) for p in MIGRATIONS_DIR.glob("*.sql")])
-        if schema_version(conn) < latest:
-            raise RuntimeError(
-                f"results DB is at schema v{schema_version(conn)}, code needs v{latest};"
-                " run `optlab init-db` to migrate"
-            )
+        require_current_schema(conn)
         self.optimizers = optimizers
         self.model_cfg = models[cfg.model]
+        if not self.model_cfg.backbone_frozen or self.model_cfg.unfrozen_last_n_layers:
+            raise ValueError("cached-feature training requires fully frozen backbones")
         if self.model_cfg.fusion_type != "weighted_sum":
             raise NotImplementedError(
                 f"fusion_type {self.model_cfg.fusion_type!r}: only weighted_sum is implemented"
@@ -143,12 +140,16 @@ class Experiment:
 
         def objective(index: int, hp: dict[str, Any]) -> float:
             done = self.conn.execute(
-                "SELECT val_auc, diverged FROM tuning_trials WHERE experiment_id = ?"
+                "SELECT val_auc, diverged, hyperparams_json FROM tuning_trials"
+                " WHERE experiment_id = ?"
                 " AND optimizer_id = ? AND model_config_id = ? AND search_method = ?"
                 " AND trial_index = ?",
                 (*key, index),
             ).fetchone()
             if done is not None:  # resume: deterministic proposals, reuse the recorded score
+                recorded = done["hyperparams_json"]
+                if json.loads(recorded) != hp:
+                    raise ValueError("tuning configuration changed; use a new experiment name")
                 return -np.inf if done["diverged"] else done["val_auc"]
             res = train(
                 self.train_split,
@@ -161,6 +162,7 @@ class Experiment:
                 self.cfg.training.patience,
                 self.cfg.training.clip_norm,
                 self.model_extra,
+                device=self.cfg.device,
             )
             diverged = res.status == "diverged"
             insert(
@@ -217,6 +219,12 @@ class Experiment:
         return Path(self.cfg.artifacts_dir) / self.cfg.name / optimizer / f"seed{seed}.pt"
 
     def train_run(self, optimizer: str, seed: int, trial: sqlite3.Row) -> int:
+        if (trial["experiment_id"], trial["optimizer_id"], trial["model_config_id"]) != (
+            self.exp_id,
+            id_of(self.conn, "optimizers", optimizer),
+            self.model_id,
+        ):
+            raise ValueError("tuning trial belongs to a different experiment, optimizer or model")
         existing = self.run_row(optimizer, seed)
         if existing is not None and existing["status"] in ("completed", "diverged"):
             return existing["id"]  # idempotent (FR-O5)
@@ -288,6 +296,7 @@ class Experiment:
                 tr.clip_norm,
                 self.model_extra,
                 on_epoch=on_epoch,
+                device=self.cfg.device,
             )
         except Exception:
             self.conn.execute(
@@ -331,12 +340,18 @@ class Experiment:
     # --- fusion and evaluation -----------------------------------------------------------
 
     def _load_model(self, run_id: int) -> tuple[LateFusion, int]:
+        run = self.conn.execute(
+            "SELECT experiment_id, model_config_id, train_dataset_id FROM runs WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+        if run is None or tuple(run) != (self.exp_id, self.model_id, self.train_ds_id):
+            raise ValueError(f"run {run_id} does not belong to this experiment configuration")
         row = self.conn.execute(
             "SELECT path FROM artifacts WHERE run_id = ? AND kind = 'checkpoint'", (run_id,)
         ).fetchone()
         if row is None:
             raise FileNotFoundError(f"run {run_id} has no checkpoint (not completed?)")
-        ckpt = torch.load(row["path"], weights_only=True)
+        ckpt = torch.load(row["path"], weights_only=True, map_location="cpu")
         model = build_model(ckpt["dims"], self.model_extra)
         model.load_state_dict(ckpt["state_dict"])
         model.eval()
@@ -344,7 +359,16 @@ class Experiment:
 
     @torch.no_grad()
     def _logits(self, model: LateFusion, split: Split) -> np.ndarray:
-        return model(split.x).numpy().astype(np.float64)
+        return (
+            torch.cat(
+                [
+                    model({m: x[i : i + 8192] for m, x in split.x.items()})
+                    for i in range(0, len(split), 8192)
+                ]
+            )
+            .numpy()
+            .astype(np.float64)
+        )
 
     def fuse(self, run_id: int, solver: str = "qp_cvxpy") -> None:
         """Fit fusion weights on val_fusion; store weights, contributions and KKT diagnostics.
@@ -352,8 +376,15 @@ class Experiment:
         `cfg.fusion` picks the formulation: plain simplex (TRD 9) or simplex with a learned
         temperature (separates logit scale from mixing; Gate 1 finding).
         """
+        if self.has_test_rows(run_id):
+            raise TestSplitAlreadyWritten("cannot refit fusion after test evaluation")
         model, _ = self._load_model(run_id)
+        cal = None
+        if self.cfg.stream_calibration:
+            cal = calibration.fit(self._logits(model, self.val_tune), self.val_tune.y.numpy())
+            cal["modalities"] = self.mods
         z = self._logits(model, self.val_fusion)
+        z = calibration.apply(z, cal)
         y_pm = self.val_fusion.y.numpy().astype(np.float64) * 2 - 1
         if self.cfg.fusion == "simplex_temperature":
             t = temperature.solve(z, y_pm, lam=self.cfg.fusion_ridge, tol=KKT_TOL)
@@ -368,6 +399,7 @@ class Experiment:
                 None,
                 t.temperature,
                 t.active_set,
+                cal,
             )
             return
         sol = SOLVERS[solver].solve(z, y_pm)
@@ -395,6 +427,7 @@ class Experiment:
             sol.multiplier,
             None,
             sol.active_set,
+            cal,
         )
 
     def _store_fusion(
@@ -409,6 +442,7 @@ class Experiment:
         multiplier: float | None,
         temp: float | None,
         active: list[int],
+        cal: dict | None = None,
     ) -> None:
         with self.conn:
             self.conn.execute("DELETE FROM fusion_weights WHERE run_id = ?", (run_id,))
@@ -433,6 +467,7 @@ class Experiment:
                     "kkt_residual": residual,
                     "lagrange_multiplier": multiplier,
                     "temperature": temp,
+                    "calibration_json": json.dumps(cal) if cal else None,
                     "active_set_json": json.dumps([self.mods[i] for i in active]),
                 },
             )
@@ -465,9 +500,15 @@ class Experiment:
             )
         model, epoch = self._load_model(run_id)
         w = self._weights(run_id)
+        solve = self.conn.execute(
+            "SELECT calibration_json, temperature FROM fusion_solves WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        cal = json.loads(solve["calibration_json"]) if solve["calibration_json"] else None
+        scale = solve["temperature"] if solve["temperature"] is not None else 1.0
 
         def scores(split: Split) -> dict[str, tuple[np.ndarray, np.ndarray]]:
-            frame = self._logits(model, split) @ w
+            frame = (calibration.apply(self._logits(model, split), cal) @ w) * scale
             labels = split.y.numpy()
             vs, vl, _ = video_scores(frame, labels, split.video_ids)
             return {"frame": (frame, labels), "video": (vs, vl)}
@@ -478,10 +519,10 @@ class Experiment:
         if final:
             targets.append(
                 (
-                    self.cfg.train_dataset,
+                    self.cfg.eval.in_distribution,
                     "test",
                     "in_distribution",
-                    scores(self._split(self.cfg.train_dataset, "test")),
+                    scores(self._split(self.cfg.eval.in_distribution, "test")),
                 )
             )
             for ds in self.cfg.eval.cross_dataset:

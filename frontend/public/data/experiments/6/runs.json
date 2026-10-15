@@ -1,0 +1,1 @@
+[{"id":201,"optimizer":"sgd","family":"plain","seed":0,"status":"failed","best_epoch":null,"early_stopped":0,"wall_clock_sec":null,"best_val_auc":0.9525,"epochs_logged":6}]

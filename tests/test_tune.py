@@ -51,3 +51,14 @@ def test_pso_and_ga_find_the_good_region() -> None:
     for method in ("pso", "ga"):
         best = max(search(method, SPACE, objective, 30, seed=0), key=lambda t: t.score)
         assert 1e-3 < best.hparams["lr"] < 1e-1
+
+
+@pytest.mark.parametrize("method", list(METHODS))
+def test_empty_search_space_still_honors_budget(method):
+    trials = search(method, {}, lambda i, hp: float(i), 7, 0)
+    assert len(trials) == 7 and all(t.hparams == {} for t in trials)
+
+
+def test_certain_zero_probability_handles_upper_endpoint():
+    dim = SpaceDim(type="log_uniform", low=1e-6, high=1e-2, p_zero=1)
+    assert from_unit({"weight_decay": dim}, np.array([1.0])) == {"weight_decay": 0.0}

@@ -34,7 +34,7 @@ def from_unit(space: Mapping[str, SpaceDim], u: np.ndarray) -> dict[str, Any]:
         if dim.type == "choice":
             out[name] = dim.values[min(int(v * len(dim.values)), len(dim.values) - 1)]
             continue
-        if dim.p_zero and v < dim.p_zero:
+        if dim.p_zero == 1 or (dim.p_zero and v < dim.p_zero):
             out[name] = 0.0
             continue
         r = (v - dim.p_zero) / (1 - dim.p_zero) if dim.p_zero else v
@@ -65,6 +65,8 @@ def grid_search(space, objective: Objective, budget: int, seed: int) -> list[Tri
     """Cell-centred grid with ceil(budget^(1/d)) points per dimension; exactly `budget` of
     its points are evaluated, in a seeded random order, to keep the budget equal."""
     d = len(space)
+    if d == 0:
+        return _run(space, objective, [np.empty(0) for _ in range(budget)])
     k = math.ceil(budget ** (1 / d) - 1e-9)
     axis = (np.arange(k) + 0.5) / k
     grid = [np.array(p) for p in itertools.product(axis, repeat=d)]
@@ -151,6 +153,10 @@ METHODS = {"random": random_search, "grid": grid_search, "pso": pso, "ga": ga}
 def search(
     method: str, space: Mapping[str, SpaceDim], objective: Objective, budget: int, seed: int
 ) -> list[Trial]:
+    if method not in METHODS:
+        raise ValueError(f"unknown search method {method!r}")
+    if budget < 1:
+        raise ValueError("search budget must be positive")
     trials = METHODS[method](space, objective, budget, seed)
     if len(trials) != budget:  # the fairness guarantee: enforce it, don't assume it
         raise AssertionError(f"{method} used {len(trials)} trials, budget was {budget}")

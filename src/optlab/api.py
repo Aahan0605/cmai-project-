@@ -15,7 +15,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from optlab.config import load_toy_experiment
-from optlab.db.connection import connect
+from optlab.db.connection import connect, require_current_schema
 from optlab.export import queries as q
 
 EXPERIMENT_VIEWS: dict[str, Callable] = {
@@ -31,6 +31,12 @@ EXPERIMENT_VIEWS: dict[str, Callable] = {
 def create_app(
     db: str | Path, toy_config: str | Path, cors_origin: str = "http://localhost:5173"
 ) -> FastAPI:
+    # Fail at startup with migration guidance rather than serving broken SQL endpoints.
+    c = connect(db, readonly=True)
+    try:
+        require_current_schema(c)
+    finally:
+        c.close()
     app = FastAPI(
         title="OptLab-DF results API",
         version="1",

@@ -15,6 +15,7 @@ from optlab.config import (
     OptimizerConfig,
     ToyBenchmarkConfig,
 )
+from optlab.db.connection import atomic
 
 
 class TestSplitAlreadyWritten(RuntimeError):
@@ -226,13 +227,14 @@ def write_evaluation(conn: sqlite3.Connection, row: Mapping[str, Any], force: bo
         key,
     ).fetchone()
     data = dict(row)
-    if existing is not None:
-        if row["split"] == "test":
-            if not force:
-                raise TestSplitAlreadyWritten(
-                    f"test evaluation already written for run {key[0]} (dataset {key[1]},"
-                    f" {key[3]}); pass --force to overwrite and flag it"
-                )
-            data["force_rewritten"] = 1
-        conn.execute("DELETE FROM evaluations WHERE id = ?", (existing[0],))
-    return insert(conn, "evaluations", data)
+    with atomic(conn):
+        if existing is not None:
+            if row["split"] == "test":
+                if not force:
+                    raise TestSplitAlreadyWritten(
+                        f"test evaluation already written for run {key[0]} (dataset {key[1]},"
+                        f" {key[3]}); pass --force to overwrite and flag it"
+                    )
+                data["force_rewritten"] = 1
+            conn.execute("DELETE FROM evaluations WHERE id = ?", (existing[0],))
+        return insert(conn, "evaluations", data)

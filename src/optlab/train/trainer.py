@@ -68,9 +68,10 @@ def evaluate_split(model: LateFusion, split: Split, batch_size: int = 8192) -> t
     from sklearn.metrics import roc_auc_score
 
     model.eval()
+    device = next(model.parameters()).device
     logits = torch.cat(
         [
-            model({m: x[i : i + batch_size] for m, x in split.x.items()})
+            model({m: x[i : i + batch_size].to(device) for m, x in split.x.items()}).cpu()
             for i in range(0, len(split), batch_size)
         ]
     )
@@ -106,15 +107,25 @@ def train(
     clip_norm: float | None,
     model_extra: dict[str, Any],
     on_epoch: Callable[[EpochLog], None] | None = None,
+    device: str = "cpu",
 ) -> TrainResult:
     """Train the heads; stop early on val_tune video AUC; keep the best weights.
 
     Seed controls parameter init and data order (TRD 5). Sampling is class-balanced with
     replacement, one epoch = len(train) samples. NaN/Inf loss -> status 'diverged'.
     """
+    for name, split in (("train", train_split), ("val_tune", val_split)):
+        if set(split.y.tolist()) != {0, 1}:
+            raise ValueError(f"{name} must contain both real and fake examples")
+    if max_epochs < 1 or batch_size < 1 or patience < 1:
+        raise ValueError("epochs, batch size and patience must be positive")
+    if {m: x.shape[1] for m, x in train_split.x.items()} != {
+        m: x.shape[1] for m, x in val_split.x.items()
+    }:
+        raise ValueError("training and validation feature dimensions must match")
     seed_everything(seed)
     dims = {m: x.shape[1] for m, x in train_split.x.items()}
-    model = build_model(dims, model_extra)
+    model = build_model(dims, model_extra).to(device)
     opt = build_from_config(opt_cfg, model.param_groups(), hparams)
     gen = torch.Generator().manual_seed(seed)
     labels = train_split.y
@@ -129,8 +140,8 @@ def train(
         losses, gnorms, step_times = [], [], []
         for i in range(0, len(order), batch_size):
             idx = order[i : i + batch_size]
-            xb = {m: x[idx] for m, x in train_split.x.items()}
-            yb = labels[idx]
+            xb = {m: x[idx].to(device) for m, x in train_split.x.items()}
+            yb = labels[idx].to(device)
             norm_box: list[float] = []
 
             def closure(
@@ -154,6 +165,7 @@ def train(
         val_loss, val_auc = evaluate_split(model, val_split)
         if not (
             math.isfinite(val_loss)
+            and math.isfinite(val_auc)
             and all(math.isfinite(float(p.detach().sum())) for p in model.parameters())
         ):
             result.status = "diverged"

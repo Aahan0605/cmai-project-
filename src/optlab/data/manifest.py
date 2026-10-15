@@ -127,6 +127,8 @@ def _assign(
 
 
 def assign_splits(rows: list[VideoRow], cfg: SplitConfig) -> list[VideoRow]:
+    if not rows:
+        raise ValueError("cannot split an empty manifest")
     comps = identity_components(rows)
     largest = max(len(c) for c in comps)
     if largest > 0.5 * len(rows):
@@ -156,4 +158,22 @@ def write_manifest(rows: list[VideoRow], path: Path) -> None:
 
 def read_manifest(path: Path) -> list[VideoRow]:
     with open(path, newline="") as f:
-        return [VideoRow(**{**r, "label": int(r["label"])}) for r in csv.DictReader(f)]
+        rows = [VideoRow(**{**r, "label": int(r["label"])}) for r in csv.DictReader(f)]
+    seen: set[str] = set()
+    identity_roles: dict[str, tuple[str, str]] = {}
+    for row in rows:
+        if not row.video_id or row.video_id in seen:
+            raise ValueError(f"{path}: empty or duplicate video ID {row.video_id!r}")
+        seen.add(row.video_id)
+        if row.label not in (0, 1) or row.split not in ("", "train", "val", "test"):
+            raise ValueError(f"{path}: invalid label or split for {row.video_id}")
+        if row.val_role not in ("", "tune", "fusion") or (row.val_role and row.split != "val"):
+            raise ValueError(f"{path}: invalid validation role for {row.video_id}")
+        if any(not ident.strip() for ident in row.identity_id.split("+")):
+            raise ValueError(f"{path}: missing identity for {row.video_id}")
+        role = (row.split, row.val_role)
+        for ident in row.identity_id.split("+"):
+            if ident in identity_roles and identity_roles[ident] != role:
+                raise ValueError(f"{path}: identity {ident!r} leaks across split/validation roles")
+            identity_roles[ident] = role
+    return rows

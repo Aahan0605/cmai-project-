@@ -331,8 +331,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_extract)
 
     def experiment_args(p: argparse.ArgumentParser) -> None:
-        p.add_argument("--experiment", help="name of configs/experiments/<name>.yaml")
-        p.add_argument("--config", help="explicit experiment config path")
+        selection = p.add_mutually_exclusive_group(required=True)
+        selection.add_argument("--experiment", help="name of configs/experiments/<name>.yaml")
+        selection.add_argument("--config", help="explicit experiment config path")
         p.add_argument("--db", default=DEFAULT_DB)
         p.add_argument("--configs", default="configs")
 
@@ -425,4 +426,6 @@ def main(argv: list[str] | None = None) -> None:
     try:
         args.func(args)
     except TestSplitAlreadyWritten as e:
+        raise SystemExit(f"error: {e}") from None
+    except (FileNotFoundError, ValueError) as e:
         raise SystemExit(f"error: {e}") from None

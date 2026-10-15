@@ -39,6 +39,8 @@ def cohens_d(a: Sequence[float], b: Sequence[float]) -> float:
 
 
 def welch_p(a: Sequence[float], b: Sequence[float]) -> float:
+    if len(a) < 2 or len(b) < 2 or (np.ptp(a) == 0 and np.ptp(b) == 0):
+        return float("nan")
     return float(stats.ttest_ind(a, b, equal_var=False).pvalue)
 
 

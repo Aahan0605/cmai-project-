@@ -92,7 +92,15 @@ def solve_newton(
         free = np.flatnonzero((u > 0) | (g < 0))
         h = logistic_hessian(u, z, y)[np.ix_(free, free)] + lam * np.eye(len(free))
         d = np.zeros(m)
-        d[free] = -np.linalg.solve(h, g[free])
+        d[free] = -np.linalg.lstsq(h, g[free], rcond=None)[0]
+        # A coupled Newton direction can point outside the feasible region at a
+        # zero coordinate even when its gradient is negative. That gives t=0
+        # and used to terminate the solver with a large KKT residual. Use a
+        # feasible projected-gradient direction to leave this boundary instead.
+        if np.any((u <= 1e-12) & (d < 0)) or float(g @ d) >= 0:
+            d = -g
+            d[(u <= 1e-12) & (d < 0)] = 0
+            u[u <= 1e-12] = 0
         neg = d < 0
         t = min(1.0, float(np.min(-u[neg] / d[neg]))) if neg.any() else 1.0
         f0 = _objective(u, z, y, lam)

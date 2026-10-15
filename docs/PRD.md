@@ -1,5 +1,7 @@
 # Product Requirements Document
 
+> Planning specification: this document includes future research work. The [README status](../README.md#project-status) and [system architecture](ARCHITECTURE.md) describe the current implementation.
+
 **Project:** OptLab-DF — Optimizer comparison and hybrid optimizer design for multimodal deepfake detection
 **Package name:** `optlab`
 **Course:** Computational Mathematics for AI & ML (Nirma University, B.Tech CSE-AIML) — innovative assignment

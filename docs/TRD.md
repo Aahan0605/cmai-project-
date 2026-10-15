@@ -1,5 +1,7 @@
 # Technical Requirements Document
 
+> Planning specification: this document includes future research work. The [README status](../README.md#project-status) and [system architecture](ARCHITECTURE.md) describe the current implementation.
+
 **Project:** OptLab-DF (`optlab`)
 **Companion docs:** `docs/PRD.md` (what and why), `docs/ARCHITECTURE.md` (diagrams), `docs/UIUX.md` (dashboard), `backend/schema.sql` (data model, source of truth)
 **Status:** Draft v1 · 2026-10-12

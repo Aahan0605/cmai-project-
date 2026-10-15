@@ -202,3 +202,61 @@ def test_cross_validation_end_to_end(setup, root: Path) -> None:
     assert count(conn, "SELECT COUNT(*) FROM fusion_weights WHERE contribution IS NULL") == 0
     text = write_cv_report(conn, "cv_test", tmp_path / "cv_stats").read_text()
     assert "Paired comparisons:" in text and "mean contribution" in text
+
+
+def test_calibrated_fusion_persists_and_cannot_refit_test(setup):
+    exp, conn, _ = setup
+    exp.cfg.stream_calibration = True
+    exp.cfg.optimizers = ["adam"]
+    exp.cfg.seeds = [0]
+    exp.sweep()
+    row = conn.execute("SELECT run_id, calibration_json FROM fusion_solves").fetchone()
+    cal = json.loads(row["calibration_json"])
+    assert len(cal["scales"]) == len(exp.mods)
+    assert np.all(np.array(cal["nll_after"]) <= np.array(cal["nll_before"]) + 1e-9)
+    exp.evaluate(row["run_id"])
+    with pytest.raises(TestSplitAlreadyWritten):
+        exp.fuse(row["run_id"])
+
+
+def test_configured_in_distribution_target_is_used(setup):
+    exp, conn, _ = setup
+    exp.cfg.eval = EvalConfig(in_distribution="celeb_df_v2")
+    exp.cfg.optimizers, exp.cfg.seeds = ["adam"], [0]
+    exp.sweep()
+    names = conn.execute(
+        "SELECT DISTINCT d.name FROM evaluations e JOIN datasets d ON d.id=e.eval_dataset_id "
+        "WHERE split='test' AND protocol='in_distribution'"
+    ).fetchall()
+    assert [r[0] for r in names] == ["celeb_df_v2"]
+
+
+def test_train_rejects_single_class_validation(setup):
+    from optlab.train.data import Split
+
+    exp, _, _ = setup
+    val = exp.val_tune
+    invalid = Split(val.x, val.y * 0, val.video_ids)
+    with pytest.raises(ValueError, match="val_tune.*both"):
+        train(
+            exp.train_split,
+            invalid,
+            exp.optimizers["adam"],
+            {"lr": 0.01},
+            0,
+            1,
+            64,
+            2,
+            None,
+            exp.model_extra,
+        )
+
+
+def test_experiment_rejects_other_experiments_run(setup):
+    exp, conn, _ = setup
+    exp.cfg.optimizers, exp.cfg.seeds = ["adam"], [0]
+    exp.sweep()
+    run = conn.execute("SELECT id FROM runs").fetchone()[0]
+    exp.exp_id += 100
+    with pytest.raises(ValueError, match="does not belong"):
+        exp.evaluate(run)

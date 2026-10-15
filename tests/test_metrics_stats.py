@@ -74,3 +74,22 @@ def test_convergence_helpers() -> None:
     assert epochs_to_target([0.5, 0.7, 0.9, 0.95], 0.9) == 2
     assert epochs_to_target([0.5], 0.9) is None
     assert area_under_curve([1.0, 0.5, 0.0]) == pytest.approx(1.0)
+
+
+def test_video_aggregation_rejects_inconsistent_labels():
+    with pytest.raises(ValueError, match="same label"):
+        video_scores(np.array([1.0, 2.0]), np.array([0, 1]), ["a", "a"])
+
+
+@pytest.mark.parametrize(
+    "scores,labels",
+    [
+        ([1.0, np.inf], [0, 1]),
+        ([1.0, 2.0], [1, 1]),
+        ([], []),
+        ([1.0], [0, 1]),
+    ],
+)
+def test_roc_rejects_invalid_inputs(scores, labels):
+    with pytest.raises(ValueError):
+        eer_and_threshold(np.array(scores), np.array(labels))

@@ -1,5 +1,7 @@
 # UI / UX Design Specification
 
+> Planning specification: this document includes future research work. The [README status](../README.md#project-status) and [system architecture](ARCHITECTURE.md) describe the current implementation.
+
 **Product:** OptLab-DF results dashboard (read-only)
 **Companion docs:** `docs/PRD.md`, `docs/TRD.md` (§12 API, §13 frontend), `backend/schema.sql`
 **Status:** Draft v1 · 2026-10-12

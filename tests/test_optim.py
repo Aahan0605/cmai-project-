@@ -163,3 +163,54 @@ def test_registry_builds_every_configured_optimizer(root: Path) -> None:
 def test_registry_rejects_unknown_hparam() -> None:
     with pytest.raises(TypeError):
         build_optimizer("adam", [torch.nn.Parameter(torch.zeros(1))], {"lr": 1e-3, "mom": 0.9})
+
+
+def test_sam_restores_parameters_when_second_closure_fails():
+    p = torch.nn.Parameter(torch.tensor([2.0], dtype=D))
+    opt = SAM([p], lambda g: torch.optim.SGD(g, lr=0.1), rho=0.5)
+    calls = 0
+
+    def closure():
+        nonlocal calls
+        calls += 1
+        opt.zero_grad()
+        if calls == 2:
+            assert p.item() != 2.0
+            raise RuntimeError("failed backward pass")
+        loss = p.square().sum()
+        loss.backward()
+        return loss
+
+    with pytest.raises(RuntimeError, match="failed backward"):
+        opt.step(closure)
+    assert p.item() == 2.0
+
+
+def test_sam_checkpoint_preserves_base_optimizer_momentum():
+    import copy
+
+    p = torch.nn.Parameter(torch.tensor([2.0], dtype=D))
+
+    def make(params):
+        return SAM(params, lambda g: torch.optim.SGD(g, lr=0.1, momentum=0.9))
+
+    opt = make([p])
+
+    def step(parameter, optimizer):
+        def closure():
+            optimizer.zero_grad()
+            loss = parameter.square().sum()
+            loss.backward()
+            return loss
+
+        optimizer.step(closure)
+
+    step(p, opt)
+    saved = copy.deepcopy(opt.state_dict())
+    assert saved["state"]
+    q = torch.nn.Parameter(p.detach().clone())
+    resumed = make([q])
+    resumed.load_state_dict(saved)
+    step(p, opt)
+    step(q, resumed)
+    torch.testing.assert_close(p, q, atol=0, rtol=0)

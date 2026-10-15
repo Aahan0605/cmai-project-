@@ -1,192 +1,228 @@
-# System Architecture
+# System architecture
 
-> Diagrams are Mermaid and render natively on GitHub. Names match `backend/schema.sql` and `docs/TRD.md`.
+This document describes the implemented system. The PRD, TRD, and UI/UX specification
+include future research ideas; consult the README status table before treating them as
+available features.
 
-## 1. System context
+## Runtime boundaries
 
-Heavy compute (feature extraction, training) runs offline on a free GPU (Colab / Kaggle). Everything it produces lands in one SQLite file plus a few artifact folders. The dashboard only reads that file, so it can run locally or be deployed as a static site from a JSON snapshot.
+OptLab-DF has two independent runtimes: an offline Python experiment pipeline and a
+read-only React results dashboard. The frontend does not upload videos or launch training.
+There is no task queue, model-serving endpoint, user account system, or cloud service.
 
 ```mermaid
-flowchart LR
-    subgraph DATA["Datasets - access request required"]
-        FF["FaceForensics++"]
-        CD["Celeb-DF v2"]
-        FA["FakeAVCeleb - audio+video"]
+flowchart TB
+    subgraph Inputs["Versioned inputs"]
+        CFG["YAML experiment, optimizer, model and extraction configs"]
+        MAN["CSV manifests: video, label, identities, split, validation role"]
     end
-
-    subgraph PREP["optlab.data - offline, once"]
-        FACE["Face detect + crop"]
-        FRAMES["Frame sampling - K per video"]
-        AUD["Audio extraction"]
-        FEAT["Frozen feature extractors<br/>visual, audio, frequency"]
-        CACHE[("Feature cache<br/>.npy shards + manifest CSVs")]
+    DATA["Local licensed datasets"]
+    subgraph Offline["Offline Python: optlab CLI"]
+        PREP["Decode sampled frames → detect and crop faces"]
+        EXT["Frozen CLIP visual / wav2vec2 audio / frequency spectrum"]
+        CACHE[("Feature cache: float16 NPY shards + index.csv + meta.json")]
+        TUNE["Equal-budget tuning on val_tune"]
+        TRAIN["Per-stream MLP heads; seed-controlled training"]
+        CAL["Positive stream scales fitted on val_tune"]
+        FUSE["Nonnegative fusion fitted on val_fusion; KKT verification"]
+        EVAL["Fixed checkpoints and thresholds → frame/video test metrics"]
+        TOY["Known-minimum toy optimization"]
     end
-
-    subgraph CORE["optlab core - Python and PyTorch"]
-        REG["Optimizer registry<br/>SGD, Momentum, NAG, RMSProp, Adam, AdamW,<br/>RAdam, AdaBelief, Lion, SAM, Hybrid"]
-        HEAD["Trainable heads<br/>per-modality MLP + fusion"]
-        FUSE["Constrained fusion solver<br/>KKT / QP on the simplex"]
-        TUNE["Tuner<br/>random, grid, PSO, GA"]
-        TRAIN["Trainer<br/>clip, early stop, checkpoint"]
-        EVAL["Evaluator<br/>AUC, EER, ACC, F1, AP"]
-        STATS["Stats<br/>bootstrap CI, Holm-corrected tests"]
-        TOY["Toy benchmarks<br/>quadratic, Rosenbrock, Rastrigin"]
-    end
-
-    DB[("results.db - SQLite<br/>schema.sql")]
-    ART[("artifacts/<br/>checkpoints, curves, configs")]
-
-    subgraph SERVE["Presentation"]
-        API["FastAPI - read-only"]
-        SNAP["Static JSON snapshot"]
-        WEB["React dashboard"]
-    end
-
-    CLI["optlab CLI"]
-
-    FF --> FACE
-    CD --> FACE
-    FA --> FACE
-    FA --> AUD
-    FACE --> FRAMES --> FEAT
-    AUD --> FEAT
-    FEAT --> CACHE
-
-    CLI --> TUNE
-    CLI --> TRAIN
-    CLI --> EVAL
-    CLI --> TOY
-    CACHE --> TRAIN
-    REG --> TRAIN
-    REG --> TOY
-    REG --> TUNE
-    HEAD --> TRAIN
-    FUSE --> HEAD
-    TUNE --> TRAIN
-    TRAIN --> EVAL
-    TRAIN --> DB
-    EVAL --> DB
-    TUNE --> DB
-    TOY --> DB
+    DB[("SQLite results.db: schema v4")]
+    ART[("Local checkpoints and toy trajectories")]
+    Q["Shared query layer: optlab.export.queries"]
+    API["FastAPI: GET /api/*"]
+    SNAP["Static JSON snapshot"]
+    WEB["React + TypeScript + TanStack Query + Vite"]
+    REPORT["CSV, Markdown and PNG reports"]
+    DATA --> PREP --> EXT --> CACHE
+    DATA --> EXT
+    CFG --> TUNE
+    MAN --> CACHE
+    CACHE --> TUNE --> TRAIN --> CAL --> FUSE --> EVAL
     TRAIN --> ART
-    DB --> STATS
-    STATS --> DB
-
-    DB --> API
-    API --> WEB
-    DB -. "optlab export-snapshot" .-> SNAP
-    SNAP -.-> WEB
+    TOY --> ART
+    TUNE --> DB
+    TRAIN --> DB
+    FUSE --> DB
+    EVAL --> DB
+    TOY --> DB
+    DB --> Q
+    Q --> API --> WEB
+    Q --> SNAP --> WEB
+    DB --> REPORT
 ```
 
-## 2. Experiment phases and gates
+Manifests are prepared before extraction; the same caches can serve different folds because
+fold membership is selected through manifests. Cached feature vectors are treated as frozen
+inputs. The current trainer rejects non-frozen backbone and unsupported fusion-model configs.
 
-The hybrid optimizer is designed only after baseline analysis, and its design is frozen before any test-split number is looked at.
+## Modules and responsibilities
 
-```mermaid
-flowchart TD
-    P0["Phase 0 - Setup<br/>repo, data access, feature cache, DB"]
-    P1["Phase 1 - Toy benchmarks<br/>optimizer maths on known functions"]
-    P2["Phase 2 - Baselines<br/>fair LR search, 5 seeds, in-dist + cross-dataset"]
-    G1{{"Gate 1<br/>baseline analysis written:<br/>where is each optimizer weak?"}}
-    P3["Phase 3 - Hybrid design<br/>update rule written, toy-tested,<br/>tuned on validation only"]
-    G2{{"Gate 2<br/>design frozen<br/>before test evaluation"}}
-    P4["Phase 4 - Hybrid evaluation + ablations<br/>same budget, same seeds"]
-    P5["Phase 5 - Dashboard, README, report"]
+| Module | Responsibility |
+|---|---|
+| `cli.py`, `config.py` | CLI commands; strict YAML validation; catalogue initialization |
+| `data/manifest.py`, `cv.py` | Identity components; split/validation-role checks; rotating grouped folds |
+| `data/timit.py` | Download, standardize, and pair TIMIT video/audio sources |
+| `data/preprocess.py`, `faces.py`, `extractors.py`, `extract.py` | Sample frames, crop faces, extract visual/audio/frequency features |
+| `data/cache.py`, `dataset.py`, `train/data.py` | Stage/publish caches; validate rows and dimensions; load selected splits |
+| `optim/` | Five from-scratch first-order optimizers, external optimizer builders, SAM |
+| `tune/search.py` | Random, grid, PSO and GA with an exact trial budget |
+| `train/trainer.py`, `models/heads.py` | Small independent heads; class-balanced sampling; clipping and early stopping |
+| `fusion/` | Calibration; convex simplex or nonnegative scaled-simplex fusion; KKT diagnostics |
+| `pipeline.py` | Resumable tune → train → fuse → evaluate orchestration |
+| `db/` | Connections, migrations, atomic writes, catalogues, conflict-detecting merges |
+| `eval/` | Metrics, bootstrap statistics, paired fold tests, reports |
+| `api.py`, `export/` | Read-only endpoints and consistent static snapshots with one JSON contract |
+| `frontend/src/` | Overview, convergence, generalization, fusion, CV, runs, tuning, toy benchmarks, protocol |
 
-    P0 --> P1 --> P2 --> G1 --> P3 --> G2 --> P4 --> P5
-    P1 -. "informs update-rule design" .-> P3
-```
-
-## 3. One training run
+## Training and evaluation sequence
 
 ```mermaid
 sequenceDiagram
-    autonumber
     participant CLI as optlab CLI
-    participant CFG as Config - YAML
-    participant DS as Feature dataset
-    participant REG as Optimizer registry
-    participant TR as Trainer
-    participant DB as results.db
-    participant EV as Evaluator
-
-    CLI->>CFG: load experiment + optimizer + seed
-    CLI->>DB: insert runs row - status running
-    CLI->>DS: open cached features - train, val
-    CLI->>REG: build optimizer from hyperparams
-    loop each epoch
-        TR->>DS: next mini-batch
-        TR->>REG: step - clip, momentum, adaptive, SAM
-        TR->>DB: append run_epochs - loss, val AUC, lr, grad norm
-        TR->>TR: early stopping + best checkpoint
+    participant Data as Cached splits
+    participant Train as Trainer and tuner
+    participant Fusion as Calibration and fusion
+    participant DB as SQLite
+    CLI->>Data: Load train / val_tune / val_fusion
+    Note over Data: Connected identities cannot cross split or validation roles
+    loop Exact tuning budget per optimizer
+        Train->>Train: Train heads; choose checkpoint on val_tune video AUC
+        Train->>DB: Record hyperparameters, validation metrics, divergence
     end
-    TR->>DB: runs.status completed - best_epoch, wall_clock
-    CLI->>EV: evaluate best checkpoint
-    EV->>DB: evaluations - val rows
-    Note over EV,DB: test and cross-dataset rows are written once per run
-    EV->>DB: evaluations - test rows - frame and video level
+    loop Each seed at selected hyperparameters
+        Train->>DB: Running status; epoch records
+        Train->>Train: Retain best validation checkpoint
+        Train->>DB: Completed/diverged/failed status and provenance
+        CLI->>Fusion: Load completed checkpoint
+        Fusion->>Fusion: Fit stream scales on val_tune, if enabled
+        Fusion->>Fusion: Fit weights on val_fusion; verify KKT residual
+        Fusion->>DB: Store scales, weights, contribution and solver diagnostics
+        CLI->>Data: Load configured test datasets
+        CLI->>DB: Write frame/video test metrics once, atomically
+    end
 ```
 
-## 4. Data model
+Training uses the configured PyTorch device. Checkpoints load onto CPU for batched fusion
+and evaluation. CPU is tested routinely; accelerator execution requires compatible hardware
+and dependencies. Extraction has separate backbone and face-detector device arguments.
 
-Simplified view of `backend/schema.sql`.
+### Fusion mathematics
+
+For stream logits `z_m`, optional calibration fits positive scales `a_m` by minimizing binary
+log loss on `val_tune`. Positive scales preserve the stream's ranking. With calibration
+frozen, the fusion split fits either:
+
+- **Simplex:** `w_m >= 0`, `sum(w) = 1`, minimize fused binary log loss.
+- **Simplex with temperature:** solve for `u_m >= 0` with a ridge penalty, then recover
+  `s = sum(u)` and `w = u/s`. The fused score is `s * sum(w_m * a_m * z_m)`.
+
+The second problem is convex in `u`. `s` is a multiplicative logit scale (inverse temperature
+in common probability-calibration terminology). A legacy solver label is `qp_cvxpy`, though
+the implemented objective is convex logistic loss, not a pure quadratic program.
+
+Calibration reduces scale confounding; weights still depend on redundancy and validation
+sampling. The `contribution` field normalizes `w_m * sd(calibrated z_m)` on `val_fusion`.
+It is a descriptive spread proxy, not a decomposition of fused variance or causal importance.
+Constant streams are excluded from scaled-simplex fitting. Solutions must satisfy a KKT
+residual below `1e-6`; a projected Newton fallback handles numerical solver failures.
+
+### Split roles
+
+| Role | Allowed use |
+|---|---|
+| Train | Fit head parameters |
+| `val_tune` | Search, checkpoint selection, thresholds and optional stream calibration |
+| `val_fusion` | Fit fusion weights and shared scale |
+| Test | Final evaluation only |
+
+`val_tune` serves several selection tasks, so its calibration NLL is a fit diagnostic,
+not an independent generalization estimate. Eight TIMIT folds hold out four people each;
+all 32 people appear in exactly one test fold. Fold training sets overlap, limiting independence.
+FF++ and Celeb-DF external evaluation is configured but has not been run.
+
+## Data model
+
+The base SQL schema is `backend/schema.sql`. Numbered migrations under
+`src/optlab/db/migrations/` upgrade it to v4.
 
 ```mermaid
 erDiagram
     datasets ||--o{ dataset_splits : has
-    datasets ||--o{ runs : "trained on"
-    datasets ||--o{ evaluations : "evaluated on"
-    experiments ||--o{ runs : contains
+    datasets ||--o{ runs : training_source
+    datasets ||--o{ evaluations : evaluated_on
     experiments ||--o{ tuning_trials : contains
-    optimizers ||--o{ runs : used_by
-    optimizers ||--o{ tuning_trials : tuned
-    optimizers ||--o{ toy_runs : used_by
-    optimizers ||--o| optimizers : "ablation of"
-    model_configs ||--o{ runs : uses
-    tuning_trials ||--o{ runs : "hyperparams reused by"
+    experiments ||--o{ runs : contains
+    optimizers ||--o{ tuning_trials : searched
+    optimizers ||--o{ runs : trains
+    model_configs ||--o{ runs : specifies
+    tuning_trials ||--o{ runs : selected_for
     runs ||--o{ run_epochs : logs
     runs ||--o{ evaluations : produces
-    runs ||--o{ fusion_weights : learns
-    runs ||--o| fusion_solves : solved_by
-    runs ||--o{ artifacts : stores
-    toy_benchmarks ||--o{ toy_runs : contains
+    runs ||--o{ fusion_weights : mixes
+    runs ||--o| fusion_solves : calibrates_and_solves
+    runs ||--o{ artifacts : saves
+    toy_benchmarks ||--o{ toy_runs : benchmarks
+    optimizers ||--o{ toy_runs : optimizes
     toy_runs ||--o{ toy_run_curves : logs
-    toy_runs ||--o{ artifacts : stores
+    toy_runs ||--o{ artifacts : saves
 ```
 
-## 5. Runtime and deployment
+Run uniqueness is `(experiment, optimizer, model, seed)`. Tuning adds method and trial index.
+These are natural keys, not configuration fingerprints: use a new experiment/model name
+when changing scientific settings. Git commit and library versions aid traceability but do
+not make mutable external inputs reproducible by themselves.
 
-```mermaid
-flowchart LR
-    subgraph GPU["Free GPU - Colab or Kaggle"]
-        RUN["optlab CLI<br/>extract, tune, train, evaluate"]
-    end
-    subgraph REPO["GitHub repository"]
-        CODE["code + configs + manifests"]
-        DBF["results.db - release asset or Git LFS"]
-        SNAPF["frontend/public/data/*.json"]
-    end
-    subgraph LOCAL["Laptop"]
-        DEV["FastAPI + Vite dev server"]
-    end
-    subgraph HOST["Static hosting - Vercel or GitHub Pages"]
-        SITE["Read-only dashboard"]
-    end
+### Failure recovery and integrity
 
-    CODE --> RUN
-    RUN --> DBF
-    DBF --> DEV
-    DBF -- "optlab export-snapshot" --> SNAPF
-    SNAPF --> SITE
-```
+- Completed/diverged training runs are reused; queued/running/failed runs restart. Epochs
+  are recorded during training. A restart does not resume a partially trained optimizer.
+- Failed SAM perturbation steps restore the original parameters. SAM state serialization
+  includes base optimizer momentum/state.
+- Feature caches publish from staging only after index, shards, and metadata are complete.
+  Duplicate frame keys, inconsistent dimensions, corrupt shards and non-finite values fail.
+- Database migrations and evaluation replacement roll back on failure. Test overwrites need
+  `--force` and are flagged. Fusion refitting after a test is refused.
+- Database merge remaps IDs through natural keys and rejects conflicting definitions/results.
+  It does not copy checkpoint or trajectory files; move those separately to usable paths.
+- Snapshot export reads a consistent SQLite backup, builds a staging directory, and preserves
+  the prior export if building fails. Directory publishing uses renames on one filesystem;
+  a client fetching multiple files during replacement can still observe a transient gap.
 
-## 6. Design decisions
+## API and frontend contract
 
-| Decision | Reason |
+| Endpoint | Data |
 |---|---|
-| Frozen backbones with cached features | Optimizer runs train only small heads, so 10 optimizers x 5 seeds x tuning fits on a free GPU. Trade-off: findings may not transfer to full fine-tuning, so Phase 4 includes an "unfreeze last N layers" ablation. |
-| SQLite results store | One file, no server, easy to version and share. Postgres-portable. |
-| Read-only dashboard | Results are produced offline; no auth or write path to secure. |
-| Static JSON snapshot | Lets the dashboard be hosted for free and keeps the repo demo-able without a backend. |
-| Test splits written once | Prevents tuning the hybrid optimizer against the benchmark it is judged on. |
-| Std-dev computed in the API layer | SQLite math functions are optional; views expose variance instead. |
+| `GET /api/health` | Availability and schema version |
+| `GET /api/meta` | Generation time, run counts, CV bases |
+| `GET /api/experiments` | Experiments, statuses and fold metadata |
+| `GET /api/optimizers` | Optimizer catalogue and search spaces |
+| `GET /api/experiments/{id}/{view}` | `leaderboard`, `convergence`, `generalisation`, `tuning`, `fusion`, `runs` |
+| `GET /api/runs/{id}` | Run, epoch history, evaluations, fusion and artifact metadata |
+| `GET /api/cv/{base}` | Seed-averaged fold statistics and paired comparisons |
+| `GET /api/toy` | Known-minimum benchmarks, curves and available saved trajectories |
+| `GET /api/docs` | Interactive OpenAPI documentation |
+
+Static mode maps `/api/<path>` to `data/<path>.json` beside the deployed frontend.
+Non-finite JSON values become `null`; the UI shows missing values explicitly. URL query
+parameters preserve the view, experiment, and selected run. API queries refresh every 15
+seconds; static snapshots refresh after a new export and page reload.
+
+Generalization uses matched seeds separately for each dataset. Seed-level pairwise tests use
+Welch tests and independent bootstrap differences. CV comparisons pair seed-averaged AUC by
+fold. Both apply Holm correction; absence of a detected difference does not establish equivalence.
+
+## Deployment and operational limits
+
+Static hosting needs only `frontend/dist`, including its snapshot files. Relative asset URLs
+support repository subpaths. Query-based navigation avoids static-host route rewrite requirements.
+
+Live mode needs the optional API dependencies, a compatible results database, and a static
+frontend or Vite. Development proxies `/api` to `127.0.0.1:8000`. Production can use a
+same-origin reverse proxy or `VITE_API_BASE_URL`; configure CORS to match the frontend origin.
+Vite's development proxy is not included in the static production build.
+
+The API binds to localhost and has no authentication. See [SECURITY.md](../SECURITY.md)
+before network exposure. CPU core tests use synthetic features; they cannot validate
+unavailable datasets, pretrained downloads, accelerator kernels or dataset licence compliance.

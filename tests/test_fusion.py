@@ -123,3 +123,16 @@ def test_temperature_fusion_holds_constant_streams_at_zero() -> None:
     sol = temperature.solve(z, y)
     assert sol.kkt_residual < 1e-6 and sol.u[1] == 0 and sol.u[2] == 0
     assert sol.weights[0] == pytest.approx(1.0) and sol.contribution[0] == pytest.approx(1.0)
+
+
+def test_temperature_newton_does_not_stall_at_boundary():
+    from optlab.fusion import temperature
+
+    rng = np.random.default_rng(1)
+    y = rng.choice([-1.0, 1.0], 40)
+    z = rng.normal(size=(40, 3)) * rng.lognormal(0, 2, 3)
+    sol = temperature.solve_newton(z, y)
+    reference = temperature.solve_cvxpy(z, y)
+    assert sol.kkt_residual < 1e-6
+    assert sol.objective == pytest.approx(reference.objective, abs=1e-7)
+    assert np.all(sol.u >= 0)

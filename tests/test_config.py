@@ -36,3 +36,31 @@ def test_committed_configs_load(root: Path) -> None:
 def test_space_dim_rejects_bad(bad: dict) -> None:
     with pytest.raises(ValidationError):
         SpaceDim.model_validate(bad)
+
+
+@pytest.mark.parametrize("field,value", [("train", -0.1), ("val", float("nan"))])
+def test_split_config_rejects_invalid_fractions(field, value):
+    from optlab.config import SplitConfig
+
+    with pytest.raises(ValidationError):
+        SplitConfig(**{field: value})
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("seeds", []),
+        ("seeds", [0, 0]),
+        ("optimizers", []),
+        ("cv_folds", 2),
+        ("training", {"clip_norm": -1}),
+        ("eval", {"in_distribution": "a", "cross_dataset": ["a"]}),
+    ],
+)
+def test_experiment_config_rejects_ambiguous_or_unusable_settings(root, field, value):
+    from optlab.config import ExperimentConfig, load_experiment
+
+    cfg = load_experiment(root / "configs/experiments/calibrated_timit_cv.yaml").model_dump()
+    cfg[field] = value
+    with pytest.raises(ValidationError):
+        ExperimentConfig.model_validate(cfg)

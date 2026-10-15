@@ -205,20 +205,29 @@ def convergence(conn: sqlite3.Connection, exp_id: int) -> dict:
 def generalisation(conn: sqlite3.Connection, exp_id: int) -> dict:
     rows = _rows(
         conn,
-        "SELECT o.name AS optimizer, o.family, g.seed, g.auc_in_distribution AS ind,"
-        " g.auc_cross_dataset AS xd, g.auc_gap AS gap FROM v_generalisation_gap g"
-        " JOIN optimizers o ON o.id = g.optimizer_id WHERE g.experiment_id = ?",
+        "SELECT o.name AS optimizer, o.family, g.seed, ind.auc AS ind,"
+        " xd.auc AS xd, ind.auc - xd.auc AS gap, di.name AS in_dataset, dx.name AS dataset"
+        " FROM runs g JOIN optimizers o ON o.id = g.optimizer_id"
+        " JOIN evaluations ind ON ind.run_id = g.id AND ind.split = 'test'"
+        " AND ind.protocol = 'in_distribution' AND ind.granularity = 'video'"
+        " JOIN evaluations xd ON xd.run_id = g.id AND xd.split = 'test'"
+        " AND xd.protocol = 'cross_dataset' AND xd.granularity = 'video'"
+        " JOIN datasets di ON di.id = ind.eval_dataset_id"
+        " JOIN datasets dx ON dx.id = xd.eval_dataset_id"
+        " WHERE g.experiment_id = ? AND g.status = 'completed'",
         exp_id,
     )
-    by: dict[str, list[dict]] = defaultdict(list)
+    by: dict[tuple[str, str, str], list[dict]] = defaultdict(list)
     for r in rows:
-        by[r["optimizer"]].append(r)
+        by[(r["optimizer"], r["in_dataset"], r["dataset"])].append(r)
     out = []
-    for o, rs in by.items():
+    for (o, in_dataset, dataset), rs in by.items():
         ind, xd, gap = ([r[k] for r in rs] for k in ("ind", "xd", "gap"))
         out.append(
             {
                 "optimizer": o,
+                "in_dataset": in_dataset,
+                "dataset": dataset,
                 "family": rs[0]["family"],
                 "n": len(rs),
                 "in_mean": float(np.mean(ind)),
@@ -228,6 +237,7 @@ def generalisation(conn: sqlite3.Connection, exp_id: int) -> dict:
                 "gap_mean": float(np.mean(gap)),
                 "gap_std": _std(gap),
                 "gap_ci95": bootstrap_ci(gap),
+                "seeds": [r["seed"] for r in rs],
             }
         )
     return {"experiment_id": exp_id, "rows": sorted(out, key=lambda r: r["gap_mean"])}
@@ -280,6 +290,7 @@ def fusion(conn: sqlite3.Connection, exp_id: int) -> dict:
         contribution[w["run_id"]][w["modality"]] = w["contribution"]
     for s in solves:
         s["active_set"] = json.loads(s.pop("active_set_json") or "[]")
+        s["calibration"] = json.loads(s.pop("calibration_json", None) or "null")
         s["weights"] = weights[s["run_id"]]
         s["contribution"] = contribution[s["run_id"]]
     return {"experiment_id": exp_id, "runs": solves}
@@ -335,6 +346,7 @@ def fusion_of_run(conn: sqlite3.Connection, run_id: int) -> dict | None:
     ws = _rows(
         conn, "SELECT modality, weight, contribution FROM fusion_weights WHERE run_id = ?", run_id
     )
+    s["calibration"] = json.loads(s.pop("calibration_json", None) or "null")
     s["weights"] = {w["modality"]: w["weight"] for w in ws}
     s["contribution"] = {w["modality"]: w["contribution"] for w in ws}
     return s

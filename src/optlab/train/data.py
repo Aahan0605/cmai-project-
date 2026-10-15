@@ -18,6 +18,17 @@ class Split:
     y: Tensor  # (n_frames,) float32, 1 = fake
     video_ids: list[str]
 
+    def __post_init__(self) -> None:
+        if self.y.ndim != 1 or len(self.video_ids) != len(self.y):
+            raise ValueError("split labels and video IDs must be aligned vectors")
+        if not torch.isin(self.y, torch.tensor([0, 1], device=self.y.device)).all():
+            raise ValueError("split labels must be binary (0 = real, 1 = fake)")
+        if not self.x or any(
+            x.ndim != 2 or len(x) != len(self.y) or not torch.isfinite(x).all()
+            for x in self.x.values()
+        ):
+            raise ValueError("split features must be finite matrices aligned with labels")
+
     def __len__(self) -> int:
         return len(self.y)
 

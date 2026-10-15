@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from optlab.db.connection import connect, schema_version
+from optlab.db.connection import atomic, connect, schema_version
 from optlab.db.repository import insert
 
 FINISHED = {"completed", "diverged", "failed"}
@@ -41,6 +41,11 @@ def _same(a: sqlite3.Row, b: sqlite3.Row, fields: list[str]) -> bool:
 
 def merge_into(dst: sqlite3.Connection, src: sqlite3.Connection) -> dict[str, int]:
     """Merge `src` into `dst` in one transaction. Returns counts of inserted rows."""
+    with atomic(dst):
+        return _merge_into(dst, src)
+
+
+def _merge_into(dst: sqlite3.Connection, src: sqlite3.Connection) -> dict[str, int]:
     if schema_version(dst) != schema_version(src):
         raise MergeConflict("schema versions differ; migrate both databases first")
     ids: dict[str, dict[int, int]] = {t: {} for t in [*NAMED, "tuning_trials"]}
@@ -50,8 +55,27 @@ def merge_into(dst: sqlite3.Connection, src: sqlite3.Connection) -> dict[str, in
     for table in NAMED:
         order = " ORDER BY parent_optimizer_id IS NOT NULL" if table == "optimizers" else ""
         for row in _rows(src, f"SELECT * FROM {table}{order}"):
-            hit = dst.execute(f"SELECT id FROM {table} WHERE name = ?", (row["name"],)).fetchone()
+            hit = dst.execute(f"SELECT * FROM {table} WHERE name = ?", (row["name"],)).fetchone()
             if hit:
+                fields = [
+                    k
+                    for k in row.keys()
+                    if k
+                    not in (
+                        "id",
+                        "created_at",
+                        "git_commit",
+                        "description",
+                        "access_notes",
+                        "parent_optimizer_id",
+                        "num_real_videos",
+                        "num_fake_videos",
+                    )
+                ]
+                if not _same(hit, row, fields):
+                    raise MergeConflict(
+                        f"catalogue {table}/{row['name']} has different definitions"
+                    )
                 ids[table][row["id"]] = hit[0]
                 continue
             over = {}
@@ -119,7 +143,7 @@ def merge_into(dst: sqlite3.Connection, src: sqlite3.Connection) -> dict[str, in
                 continue
             if hit["status"] in FINISHED:
                 fields = ["status", "hyperparams_json", "best_epoch", "finished_at"]
-                if _same(hit, row, fields):
+                if _same(hit, row, fields) and _same_run_children(dst, src, hit["id"], row["id"]):
                     continue
                 raise MergeConflict(
                     f"run (experiment={row['experiment_id']}, optimizer={row['optimizer_id']},"
@@ -168,6 +192,35 @@ def merge_into(dst: sqlite3.Connection, src: sqlite3.Connection) -> dict[str, in
     return added
 
 
+def _same_run_children(dst, src, dst_id: int, src_id: int) -> bool:
+    """Compare recorded results on natural keys, including evaluation dataset names.
+
+    Artifact paths can differ between machines; their content hashes, when present,
+    identify checkpoints. Evaluation IDs and timestamps are not scientific results.
+    """
+    for table in ("run_epochs", "fusion_weights", "fusion_solves", "evaluations", "artifacts"):
+        records = []
+        for conn, run_id in ((dst, dst_id), (src, src_id)):
+            rows = []
+            for record in conn.execute(f"SELECT * FROM {table} WHERE run_id = ?", (run_id,)):
+                data = {
+                    k: record[k]
+                    for k in record.keys()
+                    if k not in ("id", "run_id", "created_at", "evaluated_at", "solved_at")
+                }
+                if table == "evaluations":
+                    data["eval_dataset_id"] = conn.execute(
+                        "SELECT name FROM datasets WHERE id = ?", (data["eval_dataset_id"],)
+                    ).fetchone()[0]
+                if table == "artifacts":
+                    data.pop("path", None)
+                rows.append(data)
+            records.append(sorted(rows, key=lambda r: repr(sorted(r.items()))))
+        if records[0] != records[1]:
+            return False
+    return True
+
+
 def merge_databases(inputs: list[str | Path], out: str | Path) -> dict[str, int]:
     """Write `out` = inputs[0] merged with each later input. Refuses to overwrite `out`."""
     if Path(out).exists():
@@ -175,17 +228,21 @@ def merge_databases(inputs: list[str | Path], out: str | Path) -> dict[str, int]
     if len(inputs) < 2:
         raise ValueError("need at least two databases to merge")
     dst = connect(out)
-    first = connect(inputs[0], readonly=True)
-    first.backup(dst)
-    first.close()
     totals = {"runs": 0, "toy_runs": 0, "tuning_trials": 0}
     try:
+        first = connect(inputs[0], readonly=True)
+        try:
+            first.backup(dst)
+        finally:
+            first.close()
         for path in inputs[1:]:
             src = connect(path, readonly=True)
-            with dst:  # one transaction per input: all or nothing
-                for k, v in merge_into(dst, src).items():
-                    totals[k] += v
-            src.close()
+            try:
+                with dst:  # one transaction per input: all or nothing
+                    for k, v in merge_into(dst, src).items():
+                        totals[k] += v
+            finally:
+                src.close()
     except Exception:
         dst.close()
         Path(out).unlink()

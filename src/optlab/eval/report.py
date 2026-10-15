@@ -135,27 +135,36 @@ def write_stats(conn: sqlite3.Connection, experiment: str, out_dir: Path) -> Pat
             )
 
     # 3. Generalization gap (in-distribution minus cross-dataset, video level).
-    gaps: dict[str, list[float]] = defaultdict(list)
-    for r in conn.execute(
-        "SELECT o.name, g.auc_gap FROM v_generalisation_gap g"
-        " JOIN optimizers o ON o.id = g.optimizer_id"
-        " WHERE g.experiment_id = ?",
-        (exp_id,),
-    ):
-        gaps[r[0]].append(r[1])
+    from optlab.export.queries import generalisation
+
+    gaps = generalisation(conn, exp_id)["rows"]
     if gaps:
-        grow = [["optimizer", "n", "gap mean ± sd", "95% CI"]]
-        for o in sorted(gaps, key=lambda o: np.mean(gaps[o])):
-            g = gaps[o]
-            sd = float(np.std(g, ddof=1)) if len(g) > 1 else float("nan")
-            lo, hi = bootstrap_ci(g)
+        grow = [
+            [
+                "optimizer",
+                "in-distribution dataset",
+                "comparison dataset",
+                "paired seeds",
+                "gap mean ± sd",
+                "95% CI",
+            ]
+        ]
+        for r in gaps:
+            lo, hi = r["gap_ci95"]
             grow.append(
-                [o, str(len(g)), f"{_fmt(np.mean(g))} ± {_fmt(sd)}", f"[{_fmt(lo)}, {_fmt(hi)}]"]
+                [
+                    r["optimizer"],
+                    r["in_dataset"],
+                    r["dataset"],
+                    str(r["n"]),
+                    f"{_fmt(r['gap_mean'])} ± {_fmt(r['gap_std'])}",
+                    f"[{_fmt(lo)}, {_fmt(hi)}]",
+                ]
             )
         _write_csv(out_dir / "generalization_gap.csv", grow)
         sections.append(
             "## Generalization gap (in-distribution − cross-dataset test AUC, video)\n\n"
-            + _md(grow)
+            "Each comparison uses only seeds evaluated on both datasets.\n\n" + _md(grow)
         )
 
     # 4. Convergence on val_tune.

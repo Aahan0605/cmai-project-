@@ -89,7 +89,7 @@ def client(built, tmp_path_factory) -> TestClient:
 
 
 def test_health_and_catalogue(client: TestClient) -> None:
-    assert client.get("/api/health").json() == {"status": "ok", "schema_version": 3}
+    assert client.get("/api/health").json() == {"status": "ok", "schema_version": 4}
     exps = client.get("/api/experiments").json()
     assert [e["name"] for e in exps] == ["toy_api", "api_test"]
     assert {o["name"] for o in client.get("/api/optimizers").json()} >= {"adam", "sgd"}
@@ -150,4 +150,44 @@ def test_snapshot_matches_api(client: TestClient, built) -> None:
             json.loads((out / f"{path}.json").read_text()) == client.get(f"/api/{path}").json()
         ), path
     assert json.loads((out / "meta.json").read_text())["mode"] == "snapshot"
-    assert np.isclose(json.loads((out / "meta.json").read_text())["schema_version"], 3)
+    assert np.isclose(json.loads((out / "meta.json").read_text())["schema_version"], 4)
+
+
+def test_failed_export_preserves_previous_snapshot(built, monkeypatch):
+    from optlab.export import queries
+
+    db, tmp, toy_cfg = built
+    out = tmp / "preserved"
+    out.mkdir()
+    (out / "meta.json").write_text('{"previous":true}')
+    (out / "results.json").write_text("[1,2,3]")
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("simulated export failure")
+
+    monkeypatch.setattr(queries, "toy", fail)
+    with connect(db, readonly=True) as conn:
+        with pytest.raises(RuntimeError, match="simulated"):
+            export_snapshot(conn, toy_cfg, out)
+    assert (out / "meta.json").read_text() == '{"previous":true}'
+    assert (out / "results.json").read_text() == "[1,2,3]"
+
+
+def test_export_refuses_unrelated_directory(built):
+    db, tmp, toy_cfg = built
+    out = tmp / "unrelated"
+    out.mkdir()
+    (out / "important.txt").write_text("keep me")
+    with connect(db, readonly=True) as conn:
+        with pytest.raises(ValueError, match="snapshot destination"):
+            export_snapshot(conn, toy_cfg, out)
+    assert (out / "important.txt").read_text() == "keep me"
+
+
+def test_api_refuses_unmigrated_database(tmp_path):
+    db = tmp_path / "old.db"
+    conn = connect(db)
+    conn.executescript((ROOT / "backend/schema.sql").read_text())
+    conn.close()
+    with pytest.raises(RuntimeError, match="init-db"):
+        create_app(db, ROOT / "configs/experiments/toy.yaml")

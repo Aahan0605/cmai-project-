@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   python:
     runs-on: ubuntu-24.04
@@ -12,7 +15,29 @@ jobs:
       - uses: astral-sh/setup-uv@v10.3.0
         with:
           python-version: "3.11"
-      - run: uv sync
+      - run: uv sync --frozen --extra api
       - run: uv run ruff check src tests
       - run: uv run ruff format --check src tests
       - run: uv run pytest
+      - name: Fresh database and dashboard snapshot
+        run: |
+          uv run optlab init-db --db /tmp/optlab-smoke/results.db
+          uv run optlab export-snapshot --db /tmp/optlab-smoke/results.db --out /tmp/optlab-smoke/data
+      - run: uv build --wheel
+
+  frontend:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm --dir frontend format:check
+      - run: pnpm --dir frontend test
+      - run: pnpm --dir frontend build

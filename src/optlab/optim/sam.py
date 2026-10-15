@@ -25,6 +25,12 @@ class SAM(Optimizer):
         super().__init__(params, dict(rho=rho))
         self.base = base_optimizer(self.param_groups)
         self.param_groups = self.base.param_groups
+        self.state = self.base.state
+
+    def load_state_dict(self, state_dict: dict) -> None:
+        self.base.load_state_dict(state_dict)
+        self.param_groups = self.base.param_groups
+        self.state = self.base.state
 
     @torch.no_grad()
     def step(self, closure: Callable[[], Tensor] | None = None) -> Tensor:  # type: ignore[override]
@@ -33,18 +39,20 @@ class SAM(Optimizer):
         with torch.enable_grad():
             loss = closure()
         saved: list[tuple[Tensor, Tensor]] = []
-        for group in self.param_groups:
-            params = [p for p in group["params"] if p.grad is not None]
-            if not params:
-                continue
-            norm = torch.linalg.vector_norm(torch.stack([p.grad.norm() for p in params]))
-            scale = group["rho"] / (norm + 1e-12)
-            for p in params:
-                saved.append((p, p.detach().clone()))
-                p.add_(p.grad, alpha=float(scale))
-        with torch.enable_grad():
-            closure()
-        for p, theta in saved:
-            p.copy_(theta)
+        try:
+            for group in self.param_groups:
+                params = [p for p in group["params"] if p.grad is not None]
+                if not params:
+                    continue
+                norm = torch.linalg.vector_norm(torch.stack([p.grad.norm() for p in params]))
+                scale = group["rho"] / (norm + 1e-12)
+                for p in params:
+                    saved.append((p, p.detach().clone()))
+                    p.add_(p.grad, alpha=float(scale))
+            with torch.enable_grad():
+                closure()
+        finally:
+            for p, theta in saved:
+                p.copy_(theta)
         self.base.step()
         return loss

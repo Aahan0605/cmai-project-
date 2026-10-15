@@ -29,6 +29,8 @@ from optlab.data.manifest import (
 
 def fold_assignment(rows: list[VideoRow], n_folds: int, seed: int) -> list[list[list[int]]]:
     """Components (lists of row indices) dealt round-robin into folds after a seeded shuffle."""
+    if n_folds < 3:
+        raise ValueError("at least three folds are needed for train, validation and test")
     comps = identity_components(rows)
     if len(comps) < 2 * n_folds:
         raise ValueError(f"{len(comps)} identity components cannot fill {n_folds} folds")
@@ -56,6 +58,13 @@ def write_folds(
             for i in comp:
                 for ident in train_rows[i].identity_id.split("+"):
                     fold_of[ident] = k
+    for dataset, rows in manifests.items():
+        identities = {ident for row in rows for ident in row.identity_id.split("+")}
+        if identities != set(fold_of):
+            raise ValueError(f"{dataset}: CV datasets must contain the same identities")
+        for row in rows:
+            if len({fold_of[ident] for ident in row.identity_id.split("+")}) != 1:
+                raise ValueError(f"{dataset}: identity component crosses folds")
     paths = []
     for k in range(n_folds):
         val_k = (k + 1) % n_folds
