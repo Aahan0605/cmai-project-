@@ -73,7 +73,7 @@ def test_init_is_idempotent(root: Path, tmp_path: Path) -> None:
     make_db(root, tmp_path / "r.db").close()
     c = make_db(root, tmp_path / "r.db")
     assert c.execute("PRAGMA user_version").fetchone()[0] == 4
-    assert c.execute("SELECT COUNT(*) FROM optimizers").fetchone()[0] == 12
+    assert c.execute("SELECT COUNT(*) FROM optimizers").fetchone()[0] == 16
 
 
 def test_migration_upgrades_v1_database(root: Path, tmp_path: Path) -> None:

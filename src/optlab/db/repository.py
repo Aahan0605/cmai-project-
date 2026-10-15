@@ -101,7 +101,8 @@ def seed_catalogues(
     datasets: Iterable[DatasetConfig],
     toy_benchmarks: Iterable[ToyBenchmarkConfig],
 ) -> None:
-    for o in optimizers:
+    optimizer_configs = list(optimizers)
+    for o in optimizer_configs:
         upsert_by_name(
             conn,
             "optimizers",
@@ -117,6 +118,13 @@ def seed_catalogues(
                 ),
             },
         )
+    # Parents are seeded before child relationships, independent of YAML filename order.
+    for o in optimizer_configs:
+        if o.parent_optimizer:
+            conn.execute(
+                "UPDATE optimizers SET parent_optimizer_id = ?, ablation_note = ? WHERE name = ?",
+                (id_of(conn, "optimizers", o.parent_optimizer), o.ablation_note, o.name),
+            )
     for m in models:
         extra = m.model_dump(
             exclude={

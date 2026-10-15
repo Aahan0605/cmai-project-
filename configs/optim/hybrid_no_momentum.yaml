@@ -1,0 +1,26 @@
+name: hybrid_no_momentum
+family: hybrid
+in_syllabus: true
+update_rule: RMS-matched Adam/momentum blend, decoupled decay, periodic slow-weight
+  averaging
+reference: docs/HYBRID_DESIGN.md; AdamW and Lookahead
+fixed:
+  betas:
+  - 0.0
+  - 0.999
+  eps: 1.0e-08
+  blend: 0.5
+  lookahead_k: 5
+  lookahead_alpha: 0.5
+search_space:
+  lr:
+    type: log_uniform
+    low: 1.0e-05
+    high: 0.1
+  weight_decay:
+    type: log_uniform
+    low: 1.0e-06
+    high: 0.01
+    p_zero: 0.5
+parent_optimizer: hybrid_blend
+ablation_note: Remove first-moment history from both directions.

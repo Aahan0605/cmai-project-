@@ -1,0 +1,93 @@
+name: hybrid_toy
+phase: toy
+description: Phase 3 toy validation of the frozen hybrid and three ablations; known-minimum
+  checks.
+hypothesis: Blend and Lookahead alter stability; tight-tolerance convergence is measured
+  rather than assumed.
+seeds:
+- 0
+- 1
+- 2
+- 3
+- 4
+tuning_seed: 0
+lr_grid:
+- 0.0001
+- 0.0003
+- 0.001
+- 0.003
+- 0.01
+- 0.03
+- 0.1
+- 0.3
+- 1.0
+optimizers:
+- adamw
+- lion
+- sgd_momentum
+- hybrid_blend
+- hybrid_no_preconditioning
+- hybrid_no_momentum
+- hybrid_no_lookahead
+reference_optimizers:
+- newton
+- lbfgs
+hparam_overrides:
+  sam_sgd_momentum:
+    rho: 0.05
+divergence_threshold: 1.0e12
+curve_dense_steps: 100
+curve_stride: 10
+trajectory_dir: artifacts/hybrid_toy
+benchmarks:
+- name: hybrid_quadratic_k10
+  kind: quadratic
+  dim: 2
+  condition_number: 10
+  max_steps: 5000
+  tolerance: 1.0e-08
+  start_low: -1.0
+  start_high: 1.0
+  references: true
+  description: 0.5 x^T A x, A = Q diag(logspace(1, kappa)) Q^T with a fixed random
+    rotation Q
+- name: hybrid_quadratic_k100
+  kind: quadratic
+  dim: 2
+  condition_number: 100
+  max_steps: 5000
+  tolerance: 1.0e-08
+  start_low: -1.0
+  start_high: 1.0
+  references: true
+  description: 0.5 x^T A x, A = Q diag(logspace(1, kappa)) Q^T with a fixed random
+    rotation Q
+- name: hybrid_quadratic_k1000
+  kind: quadratic
+  dim: 2
+  condition_number: 1000
+  max_steps: 5000
+  tolerance: 1.0e-08
+  start_low: -1.0
+  start_high: 1.0
+  references: true
+  description: 0.5 x^T A x, A = Q diag(logspace(1, kappa)) Q^T with a fixed random
+    rotation Q
+- name: hybrid_rosenbrock
+  kind: rosenbrock
+  dim: 2
+  max_steps: 5000
+  tolerance: 1.0e-06
+  start_low: -2.0
+  start_high: 2.0
+  references: true
+  description: sum 100 (x_{i+1} - x_i^2)^2 + (1 - x_i)^2, minimum 0 at (1, ..., 1)
+- name: hybrid_rastrigin
+  kind: rastrigin
+  dim: 2
+  max_steps: 5000
+  tolerance: 1.0e-06
+  start_low: -5.12
+  start_high: 5.12
+  description: 10 n + sum x_i^2 - 10 cos(2 pi x_i), minimum 0 at the origin, many
+    local minima

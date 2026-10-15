@@ -210,18 +210,24 @@ def plot_benchmark(
 
 
 def plot_condition_scaling(
-    conn: sqlite3.Connection, optimizers: list[str], out_dir: Path
+    conn: sqlite3.Connection,
+    optimizers: list[str],
+    out_dir: Path,
+    benchmarks: list[str] | None = None,
 ) -> list[Path]:
     """Median steps to tolerance vs condition number on the quadratics (log-log).
 
     A point is drawn only where every seed reached tolerance, so medians never mix in misses.
     """
+    names = benchmarks or [r[0] for r in conn.execute("SELECT name FROM toy_benchmarks")]
+    placeholders = ",".join("?" for _ in names)
     rows = conn.execute(
-        "SELECT o.name AS optimizer, o.family, b.condition_number AS kappa,"
+        "SELECT o.name AS optimizer, o.family, b.name AS benchmark, b.condition_number AS kappa,"
         " COUNT(*) AS n, COUNT(r.steps_to_tol) AS reached"
         " FROM toy_runs r JOIN toy_benchmarks b ON b.id = r.benchmark_id"
         " JOIN optimizers o ON o.id = r.optimizer_id"
-        " WHERE b.condition_number IS NOT NULL GROUP BY o.id, b.id"
+        f" WHERE b.condition_number IS NOT NULL AND b.name IN ({placeholders}) GROUP BY o.id, b.id",
+        names,
     ).fetchall()
     if len({r["kappa"] for r in rows}) < 2:
         return []
@@ -236,8 +242,8 @@ def plot_condition_scaling(
                         "SELECT r.steps_to_tol FROM toy_runs r"
                         " JOIN toy_benchmarks b ON b.id = r.benchmark_id"
                         " JOIN optimizers o ON o.id = r.optimizer_id"
-                        " WHERE o.name = ? AND b.condition_number = ?",
-                        (o, r["kappa"]),
+                        " WHERE o.name = ? AND b.name = ?",
+                        (o, r["benchmark"]),
                     )
                 ]
                 pts.append((r["kappa"], max(median(steps), 1)))
@@ -264,7 +270,13 @@ def write_report(
     conn: sqlite3.Connection, exp: ToyExperimentConfig, out_dir: Path, summary_path: Path
 ) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
-    rows = conn.execute(RUNS_SQL).fetchall()
+    names = {b.name for b in exp.benchmarks}
+    configured_opts = set(exp.optimizers + exp.reference_optimizers)
+    rows = [
+        r
+        for r in conn.execute(RUNS_SQL)
+        if r["benchmark"] in names and r["optimizer"] in configured_opts
+    ]
     if not rows:
         raise SystemExit("no toy runs in the database; run `optlab toy` first")
     groups = _group(rows)
@@ -280,7 +292,7 @@ def write_report(
         with open(out_dir / f"{name}.csv", "w", newline="") as f:
             csv.writer(f).writerows(table)
 
-    plots = plot_condition_scaling(conn, optimizers, out_dir)
+    plots = plot_condition_scaling(conn, optimizers, out_dir, benchmarks)
     for b in benchmarks:
         by_opt = {}
         for o in optimizers:

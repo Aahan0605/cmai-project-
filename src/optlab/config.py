@@ -44,6 +44,8 @@ class OptimizerConfig(_Strict):
     name: str
     family: Family
     in_syllabus: bool = False
+    parent_optimizer: str | None = None
+    ablation_note: str | None = None
     update_rule: str | None = None
     reference: str | None = None
     fixed: dict[str, Any] = Field(default_factory=dict)  # not tuned (e.g. momentum, betas)

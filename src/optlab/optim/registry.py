@@ -19,6 +19,7 @@ from torch.optim import Optimizer
 
 from optlab.config import OptimizerConfig
 from optlab.optim.adam import Adam
+from optlab.optim.hybrid import Hybrid
 from optlab.optim.momentum import Momentum
 from optlab.optim.nag import NAG
 from optlab.optim.rmsprop import RMSProp
@@ -78,6 +79,15 @@ BUILDERS: dict[str, Builder] = {
     "lion": _with_tuple_betas(Lion),
     "sam_sgd_momentum": _sam_sgd_momentum,
     "lbfgs": torch.optim.LBFGS,
+    **{
+        name: Hybrid
+        for name in (
+            "hybrid_blend",
+            "hybrid_no_preconditioning",
+            "hybrid_no_momentum",
+            "hybrid_no_lookahead",
+        )
+    },
 }
 
 
