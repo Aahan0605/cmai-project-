@@ -1,0 +1,2 @@
+# CSV writers use CRLF; retain original manifest bytes for recorded SHA-256 provenance.
+*.csv whitespace=trailing-space,space-before-tab,cr-at-eol
