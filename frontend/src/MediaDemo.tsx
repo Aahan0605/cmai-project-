@@ -17,7 +17,6 @@ type Prediction = {
   source_run: { id: number; experiment: string };
 };
 export function MediaDemo() {
-  const [connect, setConnect] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState("");
   const [busy, setBusy] = useState(false);
@@ -27,12 +26,19 @@ export function MediaDemo() {
   const picker = useRef<HTMLInputElement>(null);
   const health = useQuery({
     queryKey: ["demo-health", base],
-    enabled: connect,
     retry: false,
     queryFn: async () => {
-      const response = await fetch(`${base}/demo/health`);
+      const response = await fetch(`${base}/demo/health`, {
+        signal: AbortSignal.timeout(8000),
+      });
       if (!response.ok) throw new Error("Local demo is unavailable");
-      return (await response.json()) as Health;
+      const body = (await response.json()) as Health;
+      if (
+        !Array.isArray(body.input_modalities) ||
+        !Number.isSafeInteger(body.source_run?.id)
+      )
+        throw new Error("Invalid local service response");
+      return body;
     },
   });
   useEffect(() => {
@@ -76,9 +82,9 @@ export function MediaDemo() {
       <span className="eyebrow">LOCAL RESEARCH DEMO</span>
       <h2>Analyze an image or short video</h2>
       <p className="muted">
-        Start the separate local inference service with an exported model.
-        Selected media is sent only when you press Analyze, processed in a
-        temporary directory, and deleted afterward.
+        The local model connects automatically. Choose an image or short video,
+        then press Analyze media. Your file is sent only when you press Analyze,
+        processed in a temporary directory, and deleted afterward.
       </p>
       <div className="notice">
         This model was evaluated on TIMIT videos. Standalone image accuracy and
@@ -86,23 +92,30 @@ export function MediaDemo() {
         verified proof of authenticity.
       </div>
       <div className="results-tools">
+        <span role="status" aria-live="polite">
+          {health.isFetching
+            ? "Checking local model connection…"
+            : health.data && !health.error
+              ? `Connected · run ${health.data.source_run.id} · ${health.data.input_modalities.join(" + ")}`
+              : "Local model is unavailable"}
+        </span>
         <button
           className="action"
-          onClick={() => {
-            setConnect(true);
-            if (connect) health.refetch();
-          }}
+          disabled={health.isFetching || busy}
+          onClick={() => health.refetch()}
         >
-          Connect local service
-        </button>
-        <span>
           {health.isFetching
-            ? "Connecting…"
-            : health.data
-              ? `Ready · run ${health.data.source_run.id} · ${health.data.input_modalities.join(" + ")}`
-              : "Service not connected"}
-        </span>
+            ? "Checking…"
+            : health.error
+              ? "Retry connection"
+              : "Check connection"}
+        </button>
       </div>
+      {health.data && !health.error && !file && (
+        <p className="notice">
+          Ready to analyze. Choose a file below to enable Analyze media.
+        </p>
+      )}
       {health.error && (
         <p role="alert">
           Cannot connect to {base}. Export a model with{" "}
@@ -154,7 +167,9 @@ export function MediaDemo() {
       <div className="results-tools">
         <button
           className="action"
-          disabled={!health.data || !file || busy || !!missingAudio}
+          disabled={
+            !health.data || !!health.error || !file || busy || !!missingAudio
+          }
           onClick={analyze}
         >
           {busy ? "Analyzing…" : "Analyze media"}

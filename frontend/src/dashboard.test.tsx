@@ -215,7 +215,7 @@ describe("URL and numerical boundaries", () => {
   });
 });
 
-it("uploads media only after explicit connection and analysis", async () => {
+it("connects automatically and uploads media only after explicit analysis", async () => {
   URL.createObjectURL = vi.fn(() => "blob:preview");
   URL.revokeObjectURL = vi.fn();
   request.mockImplementation(
@@ -241,16 +241,12 @@ it("uploads media only after explicit connection and analysis", async () => {
       ),
   );
   mount(<MediaDemo />);
-  expect(request).not.toHaveBeenCalled();
+  await screen.findByText(/Connected · run 1/);
+  expect(request).toHaveBeenCalledTimes(1);
   await userEvent.upload(
     screen.getByLabelText(/Image or video/),
     new File(["image"], "test.png", { type: "image/png" }),
   );
-  expect(request).not.toHaveBeenCalled();
-  await userEvent.click(
-    screen.getByRole("button", { name: "Connect local service" }),
-  );
-  await screen.findByText(/Ready · run 1/);
   expect(request).toHaveBeenCalledTimes(1);
   await userEvent.click(screen.getByRole("button", { name: "Analyze media" }));
   expect(await screen.findByText("Model prediction: real")).toBeTruthy();
@@ -259,4 +255,29 @@ it("uploads media only after explicit connection and analysis", async () => {
   expect(
     (screen.getByLabelText(/Image or video/) as HTMLInputElement).value,
   ).toBe("");
+});
+
+it("shows a failed demo connection and lets the user retry", async () => {
+  request.mockResolvedValueOnce(new Response("unavailable", { status: 503 }));
+  mount(<MediaDemo />);
+  expect(await screen.findByText("Local model is unavailable")).toBeTruthy();
+  expect(
+    (screen.getByRole("button", { name: "Analyze media" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  request.mockResolvedValueOnce(
+    new Response(
+      JSON.stringify({
+        input_modalities: ["visual"],
+        source_run: { id: 1 },
+        max_bytes: 26214400,
+      }),
+      { headers: { "content-type": "application/json" } },
+    ),
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "Retry connection" }),
+  );
+  expect(await screen.findByText(/Connected · run 1/)).toBeTruthy();
+  expect(await screen.findByText(/Choose a file below/)).toBeTruthy();
 });

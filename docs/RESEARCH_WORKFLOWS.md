@@ -98,7 +98,8 @@ optlab predict --bundle artifacts/demo/model.pt --input /path/to/media.png --dev
 optlab demo --bundle artifacts/demo/model.pt --host 127.0.0.1 --port 8001 --cors-origin http://127.0.0.1:5173
 ```
 
-Open the dashboard's **Media demo**, connect, select a file, then press **Analyze media**.
+Open the dashboard's **Media demo**. It checks the local service automatically; select a
+file, then press **Analyze media**. Use **Retry connection** if the service was unavailable.
 Use `--cors-origin http://localhost:5173` when visiting localhost instead. Configure another
 service URL through frontend `VITE_DEMO_API_URL` before building. Model export supports
 cached-head runs, including joint MLP/SVM; the raw fine-tuning runner has a different
