@@ -255,4 +255,8 @@ it("uploads media only after explicit connection and analysis", async () => {
   await userEvent.click(screen.getByRole("button", { name: "Analyze media" }));
   expect(await screen.findByText("Model prediction: real")).toBeTruthy();
   expect(request.mock.calls[1][1]).toMatchObject({ method: "POST" });
+  await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+  expect(
+    (screen.getByLabelText(/Image or video/) as HTMLInputElement).value,
+  ).toBe("");
 });

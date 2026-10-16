@@ -24,6 +24,7 @@ export function MediaDemo() {
   const [error, setError] = useState("");
   const [result, setResult] = useState<Prediction | null>(null);
   const controller = useRef<AbortController>();
+  const picker = useRef<HTMLInputElement>(null);
   const health = useQuery({
     queryKey: ["demo-health", base],
     enabled: connect,
@@ -112,6 +113,7 @@ export function MediaDemo() {
       <label className="filter-label">
         Image or video (up to 25 MiB)
         <input
+          ref={picker}
           type="file"
           accept=".jpg,.jpeg,.png,.webp,.bmp,.mp4,.mov,.avi,.webm,.mkv"
           disabled={busy}
@@ -162,6 +164,7 @@ export function MediaDemo() {
           disabled={busy}
           onClick={() => {
             setFile(null);
+            if (picker.current) picker.current.value = "";
             setResult(null);
             setError("");
           }}
