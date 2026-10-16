@@ -1,0 +1,3 @@
+optimizer,completed,diverged,failed,tuning trials
+adamw,5,0,0,"20 (random, 0 diverged)"
+hybrid_blend,5,0,0,"20 (random, 0 diverged)"

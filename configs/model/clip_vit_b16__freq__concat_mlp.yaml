@@ -1,0 +1,7 @@
+name: clip_vit_b16__freq__concat_mlp
+visual_backbone: clip_vit_b16
+uses_frequency_branch: true
+fusion_type: concat_mlp
+head_hidden: 256
+dropout: 0.2
+svm_c: 1.0

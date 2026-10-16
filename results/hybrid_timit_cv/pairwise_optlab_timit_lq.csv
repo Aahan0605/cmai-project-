@@ -1,0 +1,22 @@
+a,b,folds,mean diff,95% CI,paired d,Holm p,verdict
+adamw,hybrid_no_momentum,8,0.1332,"[0.0913, 0.1733]",2.07,0.013,distinguishable
+lion,hybrid_no_momentum,8,0.1308,"[0.0744, 0.1823]",1.59,0.057,within noise
+hybrid_no_momentum,hybrid_no_lookahead,8,-0.1040,"[-0.1537, -0.0540]",-1.34,0.131,within noise
+adamw,hybrid_no_preconditioning,8,0.0780,"[0.0339, 0.1310]",1.03,0.398,within noise
+lion,hybrid_no_preconditioning,8,0.0756,"[0.0183, 0.1360]",0.84,0.846,within noise
+adamw,hybrid_no_lookahead,8,0.0292,"[0.0074, 0.0541]",0.80,0.876,within noise
+sgd_momentum,hybrid_no_momentum,8,0.0902,"[0.0202, 0.1634]",0.81,0.876,within noise
+hybrid_no_preconditioning,hybrid_no_momentum,8,0.0552,"[0.0078, 0.0934]",0.81,0.876,within noise
+adamw,lion,8,0.0023,"[-0.0302, 0.0404]",0.04,1.000,within noise
+adamw,sgd_momentum,8,0.0430,"[-0.0185, 0.1079]",0.44,1.000,within noise
+adamw,hybrid_blend,8,0.0528,"[0.0013, 0.1049]",0.65,1.000,within noise
+lion,sgd_momentum,8,0.0407,"[-0.0141, 0.1015]",0.45,1.000,within noise
+lion,hybrid_blend,8,0.0504,"[-0.0021, 0.1105]",0.57,1.000,within noise
+lion,hybrid_no_lookahead,8,0.0268,"[-0.0082, 0.0694]",0.44,1.000,within noise
+sgd_momentum,hybrid_blend,8,0.0098,"[-0.0267, 0.0494]",0.17,1.000,within noise
+sgd_momentum,hybrid_no_preconditioning,8,0.0350,"[-0.0097, 0.0835]",0.48,1.000,within noise
+sgd_momentum,hybrid_no_lookahead,8,-0.0138,"[-0.0800, 0.0445]",-0.14,1.000,within noise
+hybrid_blend,hybrid_no_preconditioning,8,0.0252,"[-0.0350, 0.0814]",0.28,1.000,within noise
+hybrid_blend,hybrid_no_momentum,8,0.0804,"[0.0083, 0.1563]",0.69,1.000,within noise
+hybrid_blend,hybrid_no_lookahead,8,-0.0236,"[-0.0701, 0.0194]",-0.33,1.000,within noise
+hybrid_no_preconditioning,hybrid_no_lookahead,8,-0.0488,"[-0.1118, 0.0031]",-0.54,1.000,within noise

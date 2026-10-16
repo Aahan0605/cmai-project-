@@ -6,6 +6,8 @@ import { Feedback as State } from "./Feedback";
 import { hasInterval, initialDarkTheme, positiveId } from "./lib/selection";
 import { Tuning, ToyBenchmarks } from "./ResearchViews";
 import { LineChart } from "./LineChart";
+import { HybridView } from "./HybridView";
+import { MediaDemo } from "./MediaDemo";
 import { Comparisons, type Comparison } from "./Comparisons";
 import { RunExplorer } from "./RunExplorer";
 import { Generalization } from "./Generalization";
@@ -82,6 +84,8 @@ const tabs = [
   "Runs",
   "Tuning",
   "Toy benchmarks",
+  "Hybrid",
+  "Media demo",
   "Protocol",
 ];
 export function Results({ data }: { data: Board }) {
@@ -296,7 +300,7 @@ function FusionView({ id }: { id: number }) {
                       <summary>Validation NLL before → after</summary>
                       {(
                         r.calibration.modalities ??
-                        ["visual", "audio", "frequency"].filter(
+                        ["visual", "audio", "frequency", "joint"].filter(
                           (m) => m in r.weights,
                         )
                       ).map((m, i) => (
@@ -459,7 +463,7 @@ export function App() {
               onClick={() => setTab(t)}
             >
               <span aria-hidden="true">
-                {["◫", "⌁", "↗", "◈", "▦", "≡", "⚙", "∿", "◎"][i]}
+                {["◫", "⌁", "↗", "◈", "▦", "≡", "⚙", "∿", "⨁", "▷", "◎"][i]}
               </span>
               {t}
             </button>
@@ -528,7 +532,9 @@ export function App() {
                 generalize.
               </p>
             </div>
-            {!["Toy benchmarks", "Protocol"].includes(tab) && (
+            {!["Toy benchmarks", "Protocol", "Hybrid", "Media demo"].includes(
+              tab,
+            ) && (
               <label className="experiment-label">
                 EXPERIMENT
                 <select
@@ -624,11 +630,23 @@ export function App() {
               <ToyBenchmarks />
             </section>
           )}
+          {tab === "Hybrid" && (
+            <section className="panel">
+              <HybridView />
+            </section>
+          )}
+          {tab === "Media demo" && (
+            <section className="panel">
+              <MediaDemo />
+            </section>
+          )}
           {tab === "Protocol" && <Protocol />}
           {!experiments.isLoading &&
             !experiments.error &&
             !exp &&
-            !["Toy benchmarks", "Protocol"].includes(tab) && (
+            !["Toy benchmarks", "Protocol", "Hybrid", "Media demo"].includes(
+              tab,
+            ) && (
               <p>
                 No training experiments recorded. Run a sweep and export the
                 dashboard snapshot.

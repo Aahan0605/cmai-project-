@@ -258,3 +258,34 @@ def test_cache_rejects_reordered_shard_numbering(tmp_path):
     (out / "shard_00000.npy").rename(out / "shard_00002.npy")
     with pytest.raises(ValueError, match="numbering"):
         FeatureCache(out)
+
+
+def test_explicit_metadata_adapter_confines_files_and_requires_both_classes(tmp_path):
+    from optlab.data.manifest import parse_metadata
+
+    root = tmp_path / "media"
+    root.mkdir()
+    (root / "real.png").write_bytes(b"fixture")
+    (root / "fake.png").write_bytes(b"fixture")
+    rows = [VideoRow("r", "real.png", 0, "real", "a"), VideoRow("f", "fake.png", 1, "swap", "b+c")]
+    metadata = tmp_path / "metadata.csv"
+    write_manifest(rows, metadata)
+    assert parse_metadata(root, metadata) == rows
+    rows[1].path = "../metadata.csv"
+    write_manifest(rows, metadata)
+    with pytest.raises(ValueError, match="under the dataset root"):
+        parse_metadata(root, metadata)
+    write_manifest(rows[:1], metadata)
+    with pytest.raises(ValueError, match="both real"):
+        parse_metadata(root, metadata)
+
+
+def test_still_image_reader_applies_rgb_and_single_frame(tmp_path):
+    from PIL import Image
+
+    from optlab.data.preprocess import read_image_frame
+
+    path = tmp_path / "image.png"
+    Image.new("L", (10, 12), 100).save(path)
+    indices, frames = read_image_frame(path)
+    assert indices == [0] and frames[0].shape == (12, 10, 3)

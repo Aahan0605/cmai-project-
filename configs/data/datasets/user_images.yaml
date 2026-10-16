@@ -1,0 +1,3 @@
+name: user_images
+has_audio: false
+access_notes: User-supplied labelled image collection with explicit identity metadata. No images are bundled.

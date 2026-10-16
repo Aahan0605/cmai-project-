@@ -62,12 +62,11 @@ class ModelConfig(_Strict):
     unfrozen_last_n_layers: int = Field(0, ge=0)
     head_hidden: int = Field(256, ge=1)
     dropout: float = Field(0.2, ge=0, lt=1)
+    svm_c: float = Field(1.0, gt=0)
 
 
 class DatasetConfig(_Strict):
-    name: Literal[
-        "faceforensics_pp", "celeb_df_v2", "fakeavceleb", "optlab_timit_hq", "optlab_timit_lq"
-    ]
+    name: str = Field(min_length=1)
     has_audio: bool = False
     compression: str | None = None
     access_notes: str | None = None

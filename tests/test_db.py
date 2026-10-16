@@ -72,7 +72,7 @@ def conn(root: Path, tmp_path: Path) -> sqlite3.Connection:
 def test_init_is_idempotent(root: Path, tmp_path: Path) -> None:
     make_db(root, tmp_path / "r.db").close()
     c = make_db(root, tmp_path / "r.db")
-    assert c.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert c.execute("PRAGMA user_version").fetchone()[0] == 5
     assert c.execute("SELECT COUNT(*) FROM optimizers").fetchone()[0] == 16
 
 
@@ -80,10 +80,10 @@ def test_migration_upgrades_v1_database(root: Path, tmp_path: Path) -> None:
     conn = connect(tmp_path / "v1.db")
     conn.executescript((root / "backend" / "schema.sql").read_text())  # a pre-migration DB
     assert "library_versions_json" not in columns(conn, "runs")
-    assert init_schema(conn, root / "backend" / "schema.sql") == 4
+    assert init_schema(conn, root / "backend" / "schema.sql") == 5
     assert "library_versions_json" in columns(conn, "runs")
     assert {"formulation", "temperature", "calibration_json"} <= set(columns(conn, "fusion_solves"))
-    assert init_schema(conn, root / "backend" / "schema.sql") == 4  # re-run is a no-op
+    assert init_schema(conn, root / "backend" / "schema.sql") == 5  # re-run is a no-op
 
 
 @pytest.mark.parametrize(
@@ -244,13 +244,13 @@ def test_merge_detects_changed_children_of_otherwise_identical_runs(root, tmp_pa
 def test_failed_migration_rolls_back_ddl(conn, tmp_path, root):
     migrations = tmp_path / "migrations"
     migrations.mkdir()
-    (migrations / "005_bad.sql").write_text(
+    (migrations / "006_bad.sql").write_text(
         "ALTER TABLE runs ADD COLUMN unexpected TEXT; SELECT * FROM missing_table;"
     )
     with pytest.raises(sqlite3.OperationalError):
         init_schema(conn, root / "backend/schema.sql", migrations)
     assert "unexpected" not in columns(conn, "runs")
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
 
 
 def test_generalization_uses_paired_seeds_and_keeps_datasets_separate(conn):

@@ -1,0 +1,10 @@
+optimizer,hybrid_quadratic_k10,hybrid_quadratic_k100,hybrid_quadratic_k1000,hybrid_rosenbrock,hybrid_rastrigin
+adamw,5.31e-09,9.6e-09,9.92e-09,9.97e-07,24.9
+lion,0.115,0.12,0.135,0.00013,24.9
+sgd_momentum,3.24e-09,1.86e-09,3.92e-09,9.93e-07 (2 diverged),24.9
+hybrid_blend,4.25e-09,9.55e-09,9.88e-09,9.93e-07,20
+hybrid_no_preconditioning,3.81e-09,9.53e-09,9.94e-09,9.96e-07,9.95
+hybrid_no_momentum,2.01e-09,9.73e-09,1.18e-06,0.0327,24.9
+hybrid_no_lookahead,9.73e-09,9.86e-09,9.95e-09,9.83e-07,4.98
+newton,2.32e-32,3.11e-30,3.83e-28,5.62e-08,
+lbfgs,3.3e-10,2.18e-12,2.61e-15,8.32e-08,

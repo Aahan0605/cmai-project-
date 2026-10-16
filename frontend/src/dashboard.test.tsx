@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App, Results } from "./App";
+import { MediaDemo } from "./MediaDemo";
 import { LineChart } from "./LineChart";
 import { RunExplorer } from "./RunExplorer";
 import { Generalization } from "./Generalization";
@@ -212,4 +213,46 @@ describe("URL and numerical boundaries", () => {
     expect(hasInterval([0.5, Infinity])).toBe(false);
     expect(hasInterval([0.5, 0.8])).toBe(true);
   });
+});
+
+it("uploads media only after explicit connection and analysis", async () => {
+  URL.createObjectURL = vi.fn(() => "blob:preview");
+  URL.revokeObjectURL = vi.fn();
+  request.mockImplementation(
+    async (url: string) =>
+      new Response(
+        JSON.stringify(
+          url.endsWith("health")
+            ? {
+                input_modalities: ["visual"],
+                source_run: { id: 1 },
+                max_bytes: 26214400,
+              }
+            : {
+                prediction: "real",
+                score: 0.2,
+                frames_analyzed: 1,
+                streams: { visual: 0.2 },
+                notice: "Research",
+                source_run: { id: 1 },
+              },
+        ),
+        { headers: { "content-type": "application/json" } },
+      ),
+  );
+  mount(<MediaDemo />);
+  expect(request).not.toHaveBeenCalled();
+  await userEvent.upload(
+    screen.getByLabelText(/Image or video/),
+    new File(["image"], "test.png", { type: "image/png" }),
+  );
+  expect(request).not.toHaveBeenCalled();
+  await userEvent.click(
+    screen.getByRole("button", { name: "Connect local service" }),
+  );
+  await screen.findByText(/Ready · run 1/);
+  expect(request).toHaveBeenCalledTimes(1);
+  await userEvent.click(screen.getByRole("button", { name: "Analyze media" }));
+  expect(await screen.findByText("Model prediction: real")).toBeTruthy();
+  expect(request.mock.calls[1][1]).toMatchObject({ method: "POST" });
 });

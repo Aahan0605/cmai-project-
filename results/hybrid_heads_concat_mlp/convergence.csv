@@ -1,0 +1,3 @@
+optimizer,epochs to val AUC ≥ 0.7815,seeds reaching it,area under val loss,≈ wall clock to target (s),divergence rate
+adamw,5.0,4/5,1073.830,0.3,0/5
+hybrid_blend,2.5,4/5,1466.755,0.2,0/5

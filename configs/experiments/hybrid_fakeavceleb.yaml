@@ -1,0 +1,38 @@
+name: hybrid_fakeavceleb
+phase: hybrid
+description: Prepared for author-approved FakeAVCeleb with explicit identity metadata.
+  Not executed without licensed files.
+hypothesis: The frozen hybrid is compared to baselines and component ablations on
+  true audio/video manipulations.
+train_dataset: fakeavceleb
+eval:
+  in_distribution: fakeavceleb
+  cross_dataset: []
+model: clip_vit_b16__wav2vec2__freq__weighted_sum
+optimizers:
+- adamw
+- lion
+- sgd_momentum
+- hybrid_blend
+- hybrid_no_preconditioning
+- hybrid_no_momentum
+- hybrid_no_lookahead
+tuning:
+  method: random
+  trials: 20
+  epochs: 10
+  seed: 0
+training:
+  max_epochs: 30
+  batch_size: 256
+  patience: 5
+  clip_norm: null
+  schedule: constant
+seeds:
+- 0
+- 1
+- 2
+- 3
+- 4
+fusion: simplex_temperature
+stream_calibration: true

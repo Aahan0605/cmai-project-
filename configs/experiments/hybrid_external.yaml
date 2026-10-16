@@ -1,0 +1,39 @@
+name: hybrid_external
+phase: hybrid
+description: Pending licensed FF++ and Celeb-DF copies. Frozen visual/frequency hybrid,
+  baselines and component ablations; no external test has been executed.
+hypothesis: Evaluate the frozen hybrid against established baselines and component
+  removals on a harder external dataset; superiority is unknown.
+train_dataset: faceforensics_pp
+eval:
+  in_distribution: faceforensics_pp
+  cross_dataset:
+  - celeb_df_v2
+model: clip_vit_b16__freq__weighted_sum
+optimizers:
+- adamw
+- lion
+- sgd_momentum
+- hybrid_blend
+- hybrid_no_preconditioning
+- hybrid_no_momentum
+- hybrid_no_lookahead
+tuning:
+  method: random
+  trials: 20
+  epochs: 10
+  seed: 0
+training:
+  max_epochs: 30
+  batch_size: 256
+  patience: 5
+  clip_norm: null
+  schedule: constant
+seeds:
+- 0
+- 1
+- 2
+- 3
+- 4
+stream_calibration: true
+fusion: simplex_temperature

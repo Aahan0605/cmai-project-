@@ -82,7 +82,9 @@ def cmd_prepare(args: argparse.Namespace) -> None:
     name = DATASET_ALIASES.get(args.dataset, args.dataset)
     split_cfg = config.load_splits(args.configs)
     seed: int | None = split_cfg.seed
-    if name == "optlab_timit":
+    if args.metadata is not None:
+        outputs = {name: m.assign_splits(m.parse_metadata(args.root, args.metadata), split_cfg)}
+    elif name == "optlab_timit":
         from optlab.data import timit
 
         # One identity split shared by both qualities, so the LQ test set is as unseen
@@ -131,6 +133,8 @@ def cmd_extract(args: argparse.Namespace) -> None:
     from optlab.data import extract, extractors, faces, preprocess
 
     cfg = config.load_extraction(args.configs)
+    if args.images:
+        cfg = cfg.model_copy(update={"frames_per_video": 1})
     name = DATASET_ALIASES.get(args.dataset, args.dataset)
     manifest = args.manifest or Path("manifests") / f"{name}.csv"
     out = args.out / name
@@ -148,7 +152,9 @@ def cmd_extract(args: argparse.Namespace) -> None:
             frequency=None
             if args.no_frequency
             else extractors.FrequencyExtractor(cfg.freq_size, cfg.freq_bins),
-            read_frames=preprocess.read_sampled_frames,
+            read_frames=preprocess.read_image_frame
+            if args.images
+            else preprocess.read_sampled_frames,
         )
     elif args.backbone in cfg.audio_backbones:
         spec = cfg.audio_backbones[args.backbone]
@@ -287,6 +293,55 @@ def cmd_stats(args: argparse.Namespace) -> None:
     print(f"wrote {out}")
 
 
+def cmd_export_model(args):
+    import json
+
+    from optlab.inference import export_model
+
+    print(
+        json.dumps(export_model(Path(args.db), args.run_id, args.out, Path(args.configs)), indent=2)
+    )
+
+
+def cmd_predict(args):
+    import json
+
+    from optlab.inference import load_bundle, predict_media
+
+    print(json.dumps(predict_media(load_bundle(args.bundle), args.input, args.device), indent=2))
+
+
+def cmd_demo(args):
+    import uvicorn
+
+    from optlab.demo_api import create_demo_app
+
+    uvicorn.run(
+        create_demo_app(args.bundle, args.device, args.cors_origin),
+        host=args.host,
+        port=args.port,
+        access_log=False,
+    )
+
+
+def cmd_phase_report(args):
+    from optlab.db.connection import connect
+    from optlab.export.phase_report import write_phase_report
+
+    conn = connect(args.db, readonly=True)
+    try:
+        write_phase_report(conn, args.out)
+    finally:
+        conn.close()
+    print(f"wrote {args.out}")
+
+
+def cmd_finetune(args):
+    from optlab.train.finetune import run_finetune
+
+    run_finetune(args.config, Path(args.db))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="optlab")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -311,6 +366,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", type=Path, default=Path("manifests"))
     p.add_argument("--db", default=DEFAULT_DB)
     p.add_argument("--configs", default="configs")
+    p.add_argument(
+        "--metadata",
+        type=Path,
+        help="explicit identity metadata CSV for a licensed dataset/image collection",
+    )
     p.set_defaults(func=cmd_prepare)
 
     p = sub.add_parser("fetch-timit", help="download + standardise OptLab-TIMIT (open data)")
@@ -328,6 +388,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--detector-device", default="cpu", help="face detector device")
     p.add_argument("--no-frequency", action="store_true", help="skip the frequency stream")
     p.add_argument("--configs", default="configs")
+    p.add_argument(
+        "--images", action="store_true", help="read still images instead of video frames"
+    )
     p.set_defaults(func=cmd_extract)
 
     def experiment_args(p: argparse.ArgumentParser) -> None:
@@ -416,6 +479,35 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", type=Path, default=Path("results/toy"))
     p.add_argument("--summary", type=Path, default=Path("results/toy_summary.md"))
     p.set_defaults(func=cmd_toy_report)
+    p = sub.add_parser(
+        "export-model", help="export a completed run with validation-fixed transforms"
+    )
+    p.add_argument("--db", default=DEFAULT_DB)
+    p.add_argument("--run-id", type=int, required=True)
+    p.add_argument("--out", type=Path, required=True)
+    p.add_argument("--configs", default="configs")
+    p.set_defaults(func=cmd_export_model)
+    p = sub.add_parser("predict", help="local image/video prediction using an exported bundle")
+    p.add_argument("--bundle", type=Path, required=True)
+    p.add_argument("--input", type=Path, required=True)
+    p.add_argument("--device", default="cpu")
+    p.set_defaults(func=cmd_predict)
+    p = sub.add_parser("demo", help="opt-in local media demo service, separate from results API")
+    p.add_argument("--bundle", type=Path, required=True)
+    p.add_argument("--device", default="cpu")
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8001)
+    p.add_argument("--cors-origin", default="http://localhost:5173")
+    p.set_defaults(func=cmd_demo)
+    p = sub.add_parser("phase-report", help="write the additional-phase research report")
+    p.add_argument("--db", default=DEFAULT_DB)
+    p.add_argument("--out", type=Path, default=Path("results/PHASE_REPORT.md"))
+    p.set_defaults(func=cmd_phase_report)
+
+    p = sub.add_parser("finetune", help="paired raw-CLIP frozen/final-block ablation")
+    p.add_argument("--config", type=Path, required=True)
+    p.add_argument("--db", default=DEFAULT_DB)
+    p.set_defaults(func=cmd_finetune)
     return parser
 
 

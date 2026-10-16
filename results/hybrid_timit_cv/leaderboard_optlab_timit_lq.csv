@@ -1,0 +1,8 @@
+optimizer,folds,AUC mean ± sd over folds,95% CI
+adamw,8,0.7431 ± 0.1102,"[0.6725, 0.8164]"
+lion,8,0.7408 ± 0.1022,"[0.6671, 0.7992]"
+hybrid_no_lookahead,8,0.7139 ± 0.1101,"[0.6396, 0.7813]"
+sgd_momentum,8,0.7001 ± 0.1215,"[0.6221, 0.7803]"
+hybrid_blend,8,0.6903 ± 0.1328,"[0.6037, 0.7766]"
+hybrid_no_preconditioning,8,0.6651 ± 0.0909,"[0.6083, 0.7255]"
+hybrid_no_momentum,8,0.6099 ± 0.0679,"[0.5705, 0.6561]"

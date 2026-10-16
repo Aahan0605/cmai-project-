@@ -31,6 +31,7 @@ def _build_snapshot(conn: sqlite3.Connection, toy_cfg: ToyExperimentConfig, out:
     _write(out, "experiments", exps)
     _write(out, "optimizers", q.optimizers(conn))
     _write(out, "toy", q.toy(conn, toy_cfg))
+    _write(out, "hybrid", q.hybrid(conn))
     for base in meta["cv_bases"]:
         _write(out, f"cv/{base}", q.cv(conn, base))
     count = 0

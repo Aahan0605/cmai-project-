@@ -795,3 +795,16 @@ header .refresh-button {
     padding: 14px;
   }
 }
+
+.media-preview {
+  max-width: 100%;
+  max-height: 360px;
+  display: block;
+  margin: 20px 0;
+  border-radius: 10px;
+}
+.study-block {
+  margin-top: 36px;
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+}

@@ -1,0 +1,36 @@
+name: hybrid_heads_weighted_sum
+phase: ablation
+description: Exploratory visual/frequency head comparison on the original TIMIT identity
+  split. Standalone images use the same visual/frequency inputs; image-dataset accuracy
+  is unmeasured.
+hypothesis: RMS-matched Adam/momentum with Lookahead improves validation stability;
+  test superiority is unknown. Compare the full hybrid to each removed component and
+  three established baselines at equal tuning budgets.
+train_dataset: optlab_timit_hq
+eval:
+  in_distribution: optlab_timit_hq
+  cross_dataset:
+  - optlab_timit_lq
+model: clip_vit_b16__freq__weighted_sum
+optimizers:
+- adamw
+- hybrid_blend
+tuning:
+  method: random
+  trials: 20
+  epochs: 10
+  seed: 0
+training:
+  max_epochs: 30
+  batch_size: 256
+  patience: 5
+  clip_norm: null
+  schedule: constant
+seeds:
+- 0
+- 1
+- 2
+- 3
+- 4
+fusion: simplex_temperature
+stream_calibration: true

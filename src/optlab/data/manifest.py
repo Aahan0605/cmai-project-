@@ -177,3 +177,24 @@ def read_manifest(path: Path) -> list[VideoRow]:
                 raise ValueError(f"{path}: identity {ident!r} leaks across split/validation roles")
             identity_roles[ident] = role
     return rows
+
+
+def parse_metadata(root: Path, metadata: Path) -> list[VideoRow]:
+    """Explicit identity metadata adapter for licensed datasets and image collections.
+
+    Required columns: video_id,path,label,method,identity_id. Include every source/donor
+    identity joined with '+'. Identities cannot safely be inferred from manipulated filenames.
+    Rows must be unsplit; the ordinary identity component splitter assigns all roles.
+    """
+    rows = read_manifest(metadata)
+    if not rows or {r.label for r in rows} != {0, 1}:
+        raise ValueError("metadata needs both real and manipulated examples")
+    for row in rows:
+        if row.split or row.val_role:
+            raise ValueError("metadata adapter expects unsplit rows")
+        path = (root / row.path).resolve()
+        if not path.is_relative_to(root.resolve()) or not path.is_file():
+            raise ValueError(
+                f"metadata path must identify an existing file under the dataset root: {row.path}"
+            )
+    return rows

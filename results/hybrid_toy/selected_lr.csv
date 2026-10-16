@@ -1,0 +1,10 @@
+optimizer,hybrid_quadratic_k10,hybrid_quadratic_k100,hybrid_quadratic_k1000,hybrid_rosenbrock,hybrid_rastrigin
+adamw,0.1,0.1,0.1,1,0.0003
+lion,0.0001,0.0001,0.0001,0.001,0.0001
+sgd_momentum,0.01,0.03,0.003,0.001,0.0001
+hybrid_blend,0.1,0.1,0.1,0.1,1
+hybrid_no_preconditioning,0.3,0.1,0.1,0.1,1
+hybrid_no_momentum,0.3,0.1,0.3,0.01,0.001
+hybrid_no_lookahead,0.01,0.03,0.1,1,1
+newton,fixed,fixed,fixed,fixed,
+lbfgs,1,1,1,1,

@@ -1,0 +1,38 @@
+name: hybrid_images
+phase: hybrid
+description: Image-only workflow using explicit identity-disjoint metadata. No image-dataset
+  accuracy claimed until run on licensed labelled images.
+hypothesis: The frozen hybrid is compared to baselines and component ablations on
+  true audio/video manipulations.
+train_dataset: user_images
+eval:
+  in_distribution: user_images
+  cross_dataset: []
+model: clip_vit_b16__freq__weighted_sum
+optimizers:
+- adamw
+- lion
+- sgd_momentum
+- hybrid_blend
+- hybrid_no_preconditioning
+- hybrid_no_momentum
+- hybrid_no_lookahead
+tuning:
+  method: random
+  trials: 20
+  epochs: 10
+  seed: 0
+training:
+  max_epochs: 30
+  batch_size: 256
+  patience: 5
+  clip_norm: null
+  schedule: constant
+seeds:
+- 0
+- 1
+- 2
+- 3
+- 4
+fusion: simplex_temperature
+stream_calibration: true

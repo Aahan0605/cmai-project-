@@ -464,3 +464,65 @@ def toy(conn: sqlite3.Connection, cfg: ToyExperimentConfig, max_points: int = 40
         "curves": curves,
         "trajectories": paths,
     }
+
+
+def hybrid(conn: sqlite3.Connection) -> dict:
+    catalogue = _rows(
+        conn,
+        "SELECT o.id,o.name,o.parent_optimizer_id,o.ablation_note,p.name AS parent FROM "
+        "optimizers o LEFT JOIN optimizers p ON p.id=o.parent_optimizer_id WHERE "
+        "o.family='hybrid' ORDER BY o.id",
+    )
+    summary = _rows(
+        conn,
+        "SELECT x.name AS experiment,m.name AS model,o.name AS optimizer,r.status,COUNT(*) "
+        "AS n,AVG(r.wall_clock_sec) AS seconds FROM runs r JOIN experiments x ON "
+        "x.id=r.experiment_id JOIN optimizers o ON o.id=r.optimizer_id JOIN model_configs "
+        "m ON m.id=r.model_config_id WHERE x.phase IN ('hybrid','ablation') GROUP BY "
+        "x.id,m.id,o.id,r.status ORDER BY x.id,m.id,o.id",
+    )
+    studies = []
+    for exp in conn.execute(
+        "SELECT DISTINCT x.id,x.name FROM experiments x JOIN runs r ON r.experiment_id=x.id "
+        "WHERE x.phase IN ('hybrid','ablation') AND x.name NOT GLOB '*_f[0-9]*'"
+    ):
+        # Include model identity: fine-tuning controls and thawed variants share one experiment.
+        evaluations = _rows(
+            conn,
+            "SELECT m.name AS model,o.name AS optimizer,d.name AS "
+            "dataset,e.protocol,r.seed,e.auc,e.eer,r.wall_clock_sec FROM evaluations e JOIN "
+            "runs r ON r.id=e.run_id JOIN datasets d ON d.id=e.eval_dataset_id JOIN "
+            "model_configs m "
+            "ON m.id=r.model_config_id JOIN optimizers o ON o.id=r.optimizer_id WHERE "
+            "r.experiment_id=? AND r.status='completed' AND e.split='test' AND "
+            "e.granularity='video'",
+            exp["id"],
+        )
+        groups = defaultdict(list)
+        for r in evaluations:
+            groups[(r["model"], r["optimizer"], r["dataset"], r["protocol"])].append(r)
+        rows = []
+        for (model, optimizer, dataset, protocol), values in groups.items():
+            auc = [r["auc"] for r in values]
+            rows.append(
+                {
+                    "model": model,
+                    "dataset": dataset,
+                    "protocol": protocol,
+                    "optimizer": optimizer,
+                    "n_seeds": len(auc),
+                    "auc_mean": float(np.mean(auc)),
+                    "auc_ci95": bootstrap_ci(auc),
+                    "seconds": float(np.mean([r["wall_clock_sec"] for r in values])),
+                }
+            )
+        studies.append({"experiment": exp["name"], "rows": rows})
+    return {
+        "design_commit": "5155285",
+        "catalogue": catalogue,
+        "coverage": summary,
+        "cross_validation": cv(conn, "hybrid_timit_cv"),
+        "studies": studies,
+        "interpretation": "Exploratory TIMIT evaluation. A frozen design does not make "
+        "previously observed datasets confirmatory evidence.",
+    }

@@ -10,8 +10,14 @@ export type Comparison = {
   n?: number;
 };
 const fmt = (n: number | null) => (n == null ? "—" : n.toFixed(4));
-export function Comparisons({ rows }: { rows: Comparison[] }) {
-  const [reference, setReference] = useState("");
+export function Comparisons({
+  rows,
+  defaultReference = "",
+}: {
+  rows: Comparison[];
+  defaultReference?: string;
+}) {
+  const [reference, setReference] = useState(defaultReference);
   const names = [...new Set(rows.flatMap((r) => [r.a, r.b]))].sort();
   const selected = names.includes(reference) ? reference : names[0];
   const matches = rows.filter((r) => r.a === selected || r.b === selected);

@@ -88,8 +88,14 @@ def test_suite_writes_db_and_report(root: Path, tmp_path: Path) -> None:
     run_suite(conn, exp, optimizers, log=lambda _: None)
     assert [r[0] for r in conn.execute("SELECT id FROM toy_runs ORDER BY id")] == ids
 
+    unrelated = exp.model_copy(
+        update={"name": "other", "benchmarks": [bench("quadratic", name="unrelated", max_steps=2)]}
+    )
+    seed_catalogues(conn, [], [], [], unrelated.benchmarks)
+    run_suite(conn, unrelated, optimizers, log=lambda _: None)
     write_report(conn, exp, tmp_path / "out", tmp_path / "summary.md")
     summary = (tmp_path / "summary.md").read_text()
+    assert "unrelated" not in summary
     assert "| newton | 1 [1–1] (2/2) |" in summary
     assert (tmp_path / "out" / "q_trajectories.png").exists()
     assert (tmp_path / "out" / "quadratic_scaling.png").exists()

@@ -1,0 +1,12 @@
+name: finetune_timit
+manifest: manifests/optlab_timit_hq.csv
+video_root: data/timit
+cache: artifacts/finetune/prefix.pt
+seeds: [0, 1, 2]
+optimizers: [adamw, hybrid_blend]
+last_n: [0, 1]
+epochs: 3
+batch_size: 16
+lr: 0.0001
+weight_decay: 0.0001
+device: mps

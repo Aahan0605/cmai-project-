@@ -260,3 +260,64 @@ def test_experiment_rejects_other_experiments_run(setup):
     exp.exp_id += 100
     with pytest.raises(ValueError, match="does not belong"):
         exp.evaluate(run)
+
+
+@pytest.mark.parametrize("kind", ["concat_mlp", "svm_head"])
+def test_joint_head_experiment_pipeline(setup, root, kind):
+    exp, conn, tmp = setup
+    exp.cfg.name = "joint_" + kind
+    exp.cfg.model = "clip_vit_b16__freq__" + kind
+    exp.cfg.optimizers = ["adam"]
+    exp.cfg.seeds = [0]
+    other = Experiment(
+        conn,
+        exp.cfg,
+        tmp / "joint.yaml",
+        exp.optimizers,
+        config.load_models(root / "configs"),
+        log=lambda _: None,
+    )
+    other.sweep()
+    row = conn.execute("SELECT modality,weight FROM fusion_weights").fetchone()
+    assert tuple(row) == ("joint", 1.0)
+    assert count(conn, "SELECT COUNT(*) FROM evaluations") == 6
+
+
+@pytest.mark.parametrize("kind", ["weighted_sum", "concat_mlp", "svm_head"])
+def test_portable_bundle_exports_completed_run(setup, root, kind):
+    from optlab.inference import export_model, load_bundle, predict_features
+
+    exp, conn, tmp = setup
+    exp.cfg.optimizers, exp.cfg.seeds = ["adam"], [0]
+    exp.cfg.model = "clip_vit_b16__freq__" + kind
+    exp = Experiment(
+        conn,
+        exp.cfg,
+        exp.config_path,
+        exp.optimizers,
+        config.load_models(root / "configs"),
+        log=lambda _: None,
+    )
+    exp.config_path.write_text(exp.cfg.model_dump_json())
+    exp.sweep()
+    run = conn.execute("SELECT id FROM runs").fetchone()[0]
+    out = tmp / "demo.pt"
+    export_model(tmp / "r.db", run, out, root / "configs")
+    result = predict_features(
+        load_bundle(out), {m: x[:3].numpy() for m, x in exp.val_tune.x.items()}
+    )
+    assert result["source_run"]["id"] == run
+    assert result["frames_analyzed"] == 3
+
+
+def test_hybrid_report_keeps_evaluation_datasets_separate(setup):
+    from optlab.export.queries import hybrid
+
+    exp, conn, _ = setup
+    exp.cfg.optimizers, exp.cfg.seeds = ["adam"], [0]
+    exp.sweep()
+    conn.execute("UPDATE experiments SET phase='ablation' WHERE id=?", (exp.exp_id,))
+    conn.commit()
+    rows = hybrid(conn)["studies"][0]["rows"]
+    assert len({r["dataset"] for r in rows}) == 2
+    assert all(r["n_seeds"] == 1 for r in rows)

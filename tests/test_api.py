@@ -89,7 +89,7 @@ def client(built, tmp_path_factory) -> TestClient:
 
 
 def test_health_and_catalogue(client: TestClient) -> None:
-    assert client.get("/api/health").json() == {"status": "ok", "schema_version": 4}
+    assert client.get("/api/health").json() == {"status": "ok", "schema_version": 5}
     exps = client.get("/api/experiments").json()
     assert [e["name"] for e in exps] == ["toy_api", "api_test"]
     assert {o["name"] for o in client.get("/api/optimizers").json()} >= {"adam", "sgd"}
@@ -142,6 +142,7 @@ def test_snapshot_matches_api(client: TestClient, built) -> None:
     for path in [
         "experiments",
         "optimizers",
+        "hybrid",
         "toy",
         f"experiments/{exp_id}/leaderboard",
         f"experiments/{exp_id}/fusion",
@@ -150,7 +151,7 @@ def test_snapshot_matches_api(client: TestClient, built) -> None:
             json.loads((out / f"{path}.json").read_text()) == client.get(f"/api/{path}").json()
         ), path
     assert json.loads((out / "meta.json").read_text())["mode"] == "snapshot"
-    assert np.isclose(json.loads((out / "meta.json").read_text())["schema_version"], 4)
+    assert np.isclose(json.loads((out / "meta.json").read_text())["schema_version"], 5)
 
 
 def test_failed_export_preserves_previous_snapshot(built, monkeypatch):
@@ -191,3 +192,14 @@ def test_api_refuses_unmigrated_database(tmp_path):
     conn.close()
     with pytest.raises(RuntimeError, match="init-db"):
         create_app(db, ROOT / "configs/experiments/toy.yaml")
+
+
+def test_additional_phase_report_can_render_an_empty_study_catalogue(built):
+    from optlab.export.phase_report import write_phase_report
+
+    db, tmp, _ = built
+    with connect(db, readonly=True) as conn:
+        write_phase_report(conn, tmp / "phase-report.md")
+    text = (tmp / "phase-report.md").read_text()
+    assert "blocked on author-granted dataset copies" in text
+    assert "Additional-phase research report" in text

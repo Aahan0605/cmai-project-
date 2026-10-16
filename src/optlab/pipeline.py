@@ -36,6 +36,7 @@ from optlab.db.repository import (
 from optlab.eval.metrics import detection_metrics, eer_and_threshold, video_scores
 from optlab.fusion import calibration, kkt_closed_form, projected_gradient, qp, temperature
 from optlab.models.heads import LateFusion, modalities
+from optlab.train.checkpoint import save_checkpoint
 from optlab.train.data import Split, load_split
 from optlab.train.trainer import build_model, train
 from optlab.tune.search import search
@@ -87,14 +88,13 @@ class Experiment:
         self.model_cfg = models[cfg.model]
         if not self.model_cfg.backbone_frozen or self.model_cfg.unfrozen_last_n_layers:
             raise ValueError("cached-feature training requires fully frozen backbones")
-        if self.model_cfg.fusion_type != "weighted_sum":
-            raise NotImplementedError(
-                f"fusion_type {self.model_cfg.fusion_type!r}: only weighted_sum is implemented"
-            )
         self.mods = modalities(self.model_cfg)
+        self.score_mods = self.mods if self.model_cfg.fusion_type == "weighted_sum" else ["joint"]
         self.model_extra = {
             "head_hidden": self.model_cfg.head_hidden,
             "dropout": self.model_cfg.dropout,
+            "fusion_type": self.model_cfg.fusion_type,
+            "svm_c": self.model_cfg.svm_c,
         }
         self.exp_id = upsert_experiment(
             conn, cfg.name, cfg.phase, cfg.description, cfg.hypothesis, git_commit()
@@ -308,7 +308,9 @@ class Experiment:
             path = self.checkpoint_path(optimizer, seed)
             path.parent.mkdir(parents=True, exist_ok=True)
             dims = {m: x.shape[1] for m, x in self.train_split.x.items()}
-            torch.save({"state_dict": res.state_dict, "dims": dims, "epoch": res.best_epoch}, path)
+            save_checkpoint(
+                {"state_dict": res.state_dict, "dims": dims, "epoch": res.best_epoch}, path
+            )
             insert(
                 self.conn,
                 "artifacts",
@@ -382,7 +384,7 @@ class Experiment:
         cal = None
         if self.cfg.stream_calibration:
             cal = calibration.fit(self._logits(model, self.val_tune), self.val_tune.y.numpy())
-            cal["modalities"] = self.mods
+            cal["modalities"] = self.score_mods
         z = self._logits(model, self.val_fusion)
         z = calibration.apply(z, cal)
         y_pm = self.val_fusion.y.numpy().astype(np.float64) * 2 - 1
@@ -453,7 +455,7 @@ class Experiment:
                 ["run_id", "modality", "weight", "contribution"],
                 [
                     (run_id, m, float(w), float(np.clip(c, 0.0, 1.0)))
-                    for m, w, c in zip(self.mods, weights, contribution, strict=True)
+                    for m, w, c in zip(self.score_mods, weights, contribution, strict=True)
                 ],
             )
             insert(
@@ -468,7 +470,7 @@ class Experiment:
                     "lagrange_multiplier": multiplier,
                     "temperature": temp,
                     "calibration_json": json.dumps(cal) if cal else None,
-                    "active_set_json": json.dumps([self.mods[i] for i in active]),
+                    "active_set_json": json.dumps([self.score_mods[i] for i in active]),
                 },
             )
 
@@ -479,9 +481,9 @@ class Experiment:
                 "SELECT modality, weight FROM fusion_weights WHERE run_id = ?", (run_id,)
             )
         }
-        if set(rows) != set(self.mods):
+        if set(rows) != set(self.score_mods):
             raise RuntimeError(f"run {run_id} has no fusion weights; run `optlab fuse` first")
-        return np.array([rows[m] for m in self.mods])
+        return np.array([rows[m] for m in self.score_mods])
 
     def has_test_rows(self, run_id: int) -> bool:
         return bool(

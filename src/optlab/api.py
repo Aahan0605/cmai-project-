@@ -71,6 +71,10 @@ def create_app(
     def optimizers(c=Depends(conn)) -> list:
         return q.clean(q.optimizers(c))
 
+    @app.get("/api/hybrid")
+    def hybrid(c=Depends(conn)) -> dict:
+        return q.clean(q.hybrid(c))
+
     @app.get("/api/toy")
     def toy(c=Depends(conn)) -> dict:
         return q.clean(q.toy(c, toy_cfg))

@@ -51,3 +51,37 @@ class LateFusion(nn.Module):
         return [
             {"params": list(head.parameters()), "modality": m} for m, head in self.heads.items()
         ]
+
+
+class JointHead(LateFusion):
+    """Train-only standardized concatenation MLP or linear soft-margin SVM.
+
+    SVM objective: 0.5 ||w||² + C mean(max(0, 1-y*z)); intercept is unpenalized.
+    It is optimized through the same gradient loop, rather than solving its dual explicitly.
+    """
+
+    def __init__(self, dims, hidden=256, dropout=0.2, kind="concat_mlp", svm_c=1.0):
+        super().__init__({"joint": sum(dims.values())}, hidden, dropout)
+        self.input_modalities = list(dims)
+        self.kind, self.svm_c = kind, svm_c
+        if kind == "svm_head":
+            self.heads["joint"] = nn.Linear(sum(dims.values()), 1)
+        self.register_buffer("center", torch.zeros(sum(dims.values())))
+        self.register_buffer("scale", torch.ones(sum(dims.values())))
+
+    @torch.no_grad()
+    def fit_standardizer(self, x):
+        features = torch.cat([x[m] for m in self.input_modalities], dim=1)
+        self.center.copy_(features.mean(0))
+        self.scale.copy_(features.std(0, unbiased=False).clamp_min(1e-6))
+
+    def forward(self, x):
+        features = torch.cat([x[m] for m in self.input_modalities], dim=1)
+        return super().forward({"joint": (features - self.center) / self.scale})
+
+    def objective(self, logits, y):
+        if self.kind != "svm_head":
+            return torch.nn.functional.binary_cross_entropy_with_logits(logits[:, 0], y)
+        hinge = torch.relu(1 - (2 * y - 1) * logits[:, 0]).mean()
+        penalty = 0.5 * self.heads["joint"].weight.square().sum().to(logits.device)
+        return penalty + self.svm_c * hinge

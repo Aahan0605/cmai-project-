@@ -42,7 +42,7 @@ def connect(path: str | Path, readonly: bool = False) -> sqlite3.Connection:
         conn = sqlite3.connect(f"{Path(path).resolve().as_uri()}?mode=ro", uri=True)
     else:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(path)
+        conn = sqlite3.connect(path, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn

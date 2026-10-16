@@ -17,7 +17,7 @@ from torch.nn.functional import binary_cross_entropy_with_logits as bce
 
 from optlab.config import OptimizerConfig
 from optlab.eval.metrics import video_scores
-from optlab.models.heads import LateFusion
+from optlab.models.heads import JointHead, LateFusion
 from optlab.optim.registry import build_from_config
 from optlab.train.data import Split
 
@@ -52,13 +52,23 @@ def seed_everything(seed: int) -> None:
 
 
 def build_model(dims: dict[str, int], model_extra: dict[str, Any]) -> LateFusion:
+    if model_extra.get("fusion_type") in ("concat_mlp", "svm_head"):
+        return JointHead(
+            dims,
+            hidden=model_extra.get("head_hidden", 256),
+            dropout=model_extra.get("dropout", 0.2),
+            kind=model_extra["fusion_type"],
+            svm_c=model_extra.get("svm_c", 1.0),
+        )
     return LateFusion(
         dims, hidden=model_extra.get("head_hidden", 256), dropout=model_extra.get("dropout", 0.2)
     )
 
 
-def loss_fn(logits: Tensor, y: Tensor) -> Tensor:
+def loss_fn(logits: Tensor, y: Tensor, model: LateFusion | None = None) -> Tensor:
     """sum_m BCE(z_m, y): heads have disjoint parameters, so each learns its own stream."""
+    if isinstance(model, JointHead):
+        return model.objective(logits, y)
     return bce(logits, y[:, None].expand_as(logits), reduction="none").mean(0).sum()
 
 
@@ -75,7 +85,7 @@ def evaluate_split(model: LateFusion, split: Split, batch_size: int = 8192) -> t
             for i in range(0, len(split), batch_size)
         ]
     )
-    loss = float(loss_fn(logits, split.y))
+    loss = float(loss_fn(logits, split.y, model))
     vid, labels, _ = video_scores(
         logits.mean(1).numpy().astype(np.float64), split.y.numpy(), split.video_ids
     )
@@ -125,7 +135,10 @@ def train(
         raise ValueError("training and validation feature dimensions must match")
     seed_everything(seed)
     dims = {m: x.shape[1] for m, x in train_split.x.items()}
-    model = build_model(dims, model_extra).to(device)
+    model = build_model(dims, model_extra)
+    if isinstance(model, JointHead):
+        model.fit_standardizer(train_split.x)
+    model = model.to(device)
     opt = build_from_config(opt_cfg, model.param_groups(), hparams)
     gen = torch.Generator().manual_seed(seed)
     labels = train_split.y
@@ -148,7 +161,7 @@ def train(
                 xb: dict[str, Tensor] = xb, yb: Tensor = yb, box: list = norm_box
             ) -> Tensor:
                 opt.zero_grad()
-                loss = loss_fn(model(xb), yb)
+                loss = loss_fn(model(xb), yb, model)
                 loss.backward()
                 box.append(_clip_per_head(model, clip_norm))  # first call = norm at theta
                 return loss

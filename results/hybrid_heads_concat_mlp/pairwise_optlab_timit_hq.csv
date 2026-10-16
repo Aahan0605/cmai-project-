@@ -1,0 +1,2 @@
+a,b,mean diff,95% CI,Cohen's d,Holm p,verdict
+hybrid_blend,adamw,0.0062,"[-0.0476, 0.0594]",0.13,0.844,within noise

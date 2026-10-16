@@ -1,0 +1,3 @@
+optimizer,n seeds,AUC mean ± sd,95% CI,EER mean,fit time (s)
+hybrid_blend,5,0.8750 ± 0.0513,"[0.8357, 0.9143]",0.2450,0.6
+adamw,5,0.8626 ± 0.0349,"[0.8352, 0.8900]",0.2450,0.6

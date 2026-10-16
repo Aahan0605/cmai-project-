@@ -14,7 +14,7 @@ records the experiment in SQLite. A React dashboard makes the runs and uncertain
 
 The project is a Computational Mathematics for AI & ML assignment at Nirma University.
 Optimization is the subject; deepfake detection is the experimental testbed. The interface
-is a research results explorer. Video-upload prediction is outside the implemented workflow.
+is a research results explorer with an optional local image/video inference demo.
 
 ## Contents
 
@@ -36,7 +36,7 @@ is a research results explorer. Video-upload prediction is outside the implement
 
 | Component | What it does |
 |---|---|
-| Optimizer library | From-scratch SGD, Momentum, NAG, RMSProp and Adam; AdamW, RAdam, AdaBelief and Lion integrations; a SAM wrapper |
+| Optimizer library | From-scratch SGD, Momentum, NAG, RMSProp and Adam; AdamW, RAdam, AdaBelief and Lion integrations; a SAM wrapper; an experimental adaptive/momentum/Lookahead hybrid and three ablations |
 | Toy benchmarks | Ill-conditioned quadratics, Rosenbrock and Rastrigin; Newton and L-BFGS references |
 | Data pipeline | Identity-disjoint manifests, sampled face crops, frozen CLIP/wav2vec2 features, frequency spectrum, validated feature caches |
 | Experiment runner | Equal-budget random/grid/PSO/GA tuning, seeded training, class balancing, clipping, early stopping, best checkpoints, resumable sweeps |
@@ -44,7 +44,7 @@ is a research results explorer. Video-upload prediction is outside the implement
 | Evaluation | Frame/video AUC, EER, accuracy, F1, AP, bootstrap intervals and Holm-corrected comparisons |
 | Grouped CV | Eight TIMIT folds, all 32 people tested once, seed-averaged comparisons paired by fold |
 | Results backend | Migrated SQLite schema, atomic writes, read-only FastAPI, conflict-detecting database merge, static snapshot export |
-| Frontend | Overview, convergence, generalization, fusion, CV, searchable runs, tuning, toy curves/trajectories, protocol, CSV exports and shareable links |
+| Frontend | Overview, convergence, generalization, fusion, CV, searchable runs, tuning, toy curves/trajectories, hybrid studies, local media demo, protocol, CSV exports and shareable links |
 
 ## Quick start
 
@@ -140,11 +140,15 @@ flowchart LR
     QUERY --> API --> WEB
     QUERY --> SNAP --> WEB
     DB --> REPORT
+    DB --> BUNDLE["Exported calibrated model bundle"]
+    BUNDLE --> DEMO["Opt-in local media demo :8001"]
+    MEDIA["Image/video upload"] --> DEMO --> WEB
 ```
 
 The Python pipeline produces results offline. The frontend consumes the same JSON contract
 from either the API or a static snapshot. API requests open SQLite read-only, and the frontend
-has no write or training endpoint.
+has no training endpoint. A separate opt-in demo service processes temporary uploads without
+writing to the results database. See [research workflows](docs/RESEARCH_WORKFLOWS.md).
 
 See [the detailed architecture](docs/ARCHITECTURE.md) for the module map, training sequence,
 ER diagram, fusion formulation, API contract, failure recovery, and deployment boundaries.
@@ -170,7 +174,8 @@ ER diagram, fusion formulation, API contract, failure recovery, and deployment b
    and adjusted statistical tests. CV first averages seeds within a fold and compares optimizers
    paired by fold. No detected difference does not establish equivalence.
 
-The heads minimize the sum of binary cross-entropy across streams. Frozen backbones make
+Weighted-sum heads minimize binary cross-entropy across streams. Joint MLP uses binary
+cross-entropy; the linear SVM uses a regularized hinge objective. Frozen backbones make
 optimizer comparisons cheaper, while also limiting conclusions to head training. Calibration
 reduces scale confounding; mixing weights still reflect redundancy and validation sampling,
 so they do not measure causal stream importance. `val_tune` is reused for several selection
@@ -318,8 +323,9 @@ by default; see [SECURITY.md](SECURITY.md) before exposing it on a network.
 | `manifests/*.csv` | Video IDs/paths, labels, target/donor identities and split roles |
 
 Configs reject unknown fields, non-finite numbers and invalid budgets. The cached-feature
-trainer supports frozen backbones with weighted-sum fusion. Concat-MLP, SVM fusion and
-backbone fine-tuning are future model variants and fail explicitly if requested.
+trainer supports weighted-sum, concatenated MLP and linear SVM heads. The separate
+`optlab finetune` runner compares frozen CLIP with an updated final transformer block;
+its prefix cache stops upstream of every trainable backbone parameter.
 
 Use a **new experiment name and config** when changing scientific settings. Run keys identify
 an experiment/optimizer/model/seed; they do not fingerprint all mutable configs and inputs.
@@ -343,6 +349,23 @@ root so stored config and artifact paths resolve. Merging databases remaps IDs a
 conflicting results; it does not copy artifact files. Move checkpoints/trajectories separately.
 `evaluate --force` overwrites and flags test metrics; fusion cannot be refitted after testing.
 
+### Additional-phase findings
+
+| Exploratory TIMIT study | AdamW video AUC | Full hybrid video AUC |
+|---|---:|---:|
+| HQ, eight-fold multimodal CV | 0.6738 | 0.6475 |
+| Joint MLP, HQ fixed split, five seeds | 0.8054 | 0.8116 |
+| Frozen raw CLIP control, HQ, three seeds | 0.6050 | 0.5258 |
+| Final-block CLIP fine-tuning, HQ, three seeds | 0.8323 | 0.7708 |
+
+These rows use different protocols and must not be ranked against one another. The hybrid
+CV study found no distinguishable optimizer pairs after Holm correction. The limited
+fine-tuning ablation improved observed means over its paired frozen control, but uses one
+frame/video and three epochs. See [the phase report](results/PHASE_REPORT.md) for intervals,
+all ablations and limitations. OpenCLIP emitted a QuickGELU/pretrained-tag mismatch warning;
+the studies consistently use the configured implementation, rather than demonstrating exact
+reference-CLIP reproduction. Changing the activation requires fresh caches and experiments.
+
 ## Project status
 
 | Area | Status |
@@ -351,16 +374,20 @@ conflicting results; it does not copy artifact files. Move checkpoints/trajector
 | TIMIT data preparation and features | Implemented; dataset card documents construction caveats |
 | Single-split baselines | Completed; superseded runs preserved |
 | Calibrated grouped CV | Completed: 400 runs, eight folds, all 32 people |
-| Results API and static export | Implemented; schema v4; shared contract tests |
+| Results API and static export | Implemented; schema v5; shared contract tests |
 | Frontend and CI | Implemented; Python/frontend checks, build and fresh-DB smoke test |
 | FF++ → Celeb-DF | Configured; blocked on author-granted dataset access and real-layout verification |
-| FakeAVCeleb | Catalogue only; parser and dataset-backed study pending |
-| Hybrid optimizer and ablations | Research work pending: write/freeze a design, validate it, then evaluate on an untouched test |
-| Concat/SVM heads and backbone fine-tuning | Future model variants; outside the current cached-head pipeline |
+| FakeAVCeleb | Explicit identity-metadata adapter and experiment config implemented; real-data evaluation awaits access |
+| Hybrid optimizer and ablations | Design frozen at `5155285`; toy and equal-budget grouped TIMIT studies; see the phase report |
+| Concat/SVM heads and backbone fine-tuning | Implemented with paired studies; fine-tuning is a limited final-block ablation |
+| Image/video inference | Portable calibrated bundles, CLI and optional local demo; standalone image accuracy remains unmeasured |
 
 The existing baseline study found weak evidence of optimizer superiority. A hybrid designed
-from these observations must be framed as exploratory, and new confirmatory claims need a
+from these observations is framed as exploratory, and new confirmatory claims need a
 fresh evaluation. The planning documents describe intended research scope, not completed work.
+
+See [the completed-phase report](results/PHASE_REPORT.md), [hybrid design](docs/HYBRID_DESIGN.md),
+and [additional workflows](docs/RESEARCH_WORKFLOWS.md) for protocols, results and remaining access requirements.
 
 ## Repository layout
 
@@ -435,7 +462,8 @@ fixed failures, verification scope, and remaining work.
 
 ## Limitations and responsible use
 
-- Frozen-backbone head training does not establish results for end-to-end model fine-tuning.
+- Frozen-backbone head results and the limited three-epoch final-block ablation do not establish
+  performance for full end-to-end training.
 - TIMIT contains older face swaps, frontal recordings, and a small identity population.
   The HQ-to-LQ shift does not measure unseen-generator generalization.
 - Five seeds describe initialization variability. Eight overlapping training folds provide

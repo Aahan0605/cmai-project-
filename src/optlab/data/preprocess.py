@@ -87,3 +87,11 @@ def load_audio(path: Path, sample_rate: int) -> np.ndarray:
     with wave.open(io.BytesIO(out)) as w:
         pcm = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
     return pcm.astype(np.float32) / 32768.0
+
+
+def read_image_frame(path: Path, k: int = 1) -> tuple[list[int], list[np.ndarray]]:
+    from PIL import Image, ImageOps
+
+    with Image.open(path) as image:
+        rgb = np.array(ImageOps.exif_transpose(image).convert("RGB"))
+    return [0], [rgb]

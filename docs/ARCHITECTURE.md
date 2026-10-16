@@ -6,9 +6,11 @@ available features.
 
 ## Runtime boundaries
 
-OptLab-DF has two independent runtimes: an offline Python experiment pipeline and a
-read-only React results dashboard. The frontend does not upload videos or launch training.
-There is no task queue, model-serving endpoint, user account system, or cloud service.
+OptLab-DF has an offline Python experiment pipeline, a read-only results API/static snapshot,
+and a React dashboard. An optional separate local model service processes temporary image/video
+uploads from the Media demo view. It does not write results or launch training. There is no
+task queue, user account system or cloud service. See [research workflows](RESEARCH_WORKFLOWS.md)
+for the inference and raw-backbone ablation architecture.
 
 ```mermaid
 flowchart TB
@@ -22,13 +24,13 @@ flowchart TB
         EXT["Frozen CLIP visual / wav2vec2 audio / frequency spectrum"]
         CACHE[("Feature cache: float16 NPY shards + index.csv + meta.json")]
         TUNE["Equal-budget tuning on val_tune"]
-        TRAIN["Per-stream MLP heads; seed-controlled training"]
+        TRAIN["Per-stream MLP / joint MLP / linear SVM; seeded training"]
         CAL["Positive stream scales fitted on val_tune"]
         FUSE["Nonnegative fusion fitted on val_fusion; KKT verification"]
         EVAL["Fixed checkpoints and thresholds → frame/video test metrics"]
         TOY["Known-minimum toy optimization"]
     end
-    DB[("SQLite results.db: schema v4")]
+    DB[("SQLite results.db: schema v5")]
     ART[("Local checkpoints and toy trajectories")]
     Q["Shared query layer: optlab.export.queries"]
     API["FastAPI: GET /api/*"]
@@ -145,7 +147,7 @@ FF++ and Celeb-DF external evaluation is configured but has not been run.
 ## Data model
 
 The base SQL schema is `backend/schema.sql`. Numbered migrations under
-`src/optlab/db/migrations/` upgrade it to v4.
+`src/optlab/db/migrations/` upgrade it to v5.
 
 ```mermaid
 erDiagram
@@ -226,3 +228,20 @@ Vite's development proxy is not included in the static production build.
 The API binds to localhost and has no authentication. See [SECURITY.md](../SECURITY.md)
 before network exposure. CPU core tests use synthetic features; they cannot validate
 unavailable datasets, pretrained downloads, accelerator kernels or dataset licence compliance.
+
+
+## Additional-phase modules
+
+`optim/hybrid.py` contains the full hybrid and supports component removals registered as
+child optimizers. `models/heads.py` implements train-standardized joint MLP/SVM variants;
+`train/finetune.py` runs the paired raw CLIP ablation with frozen-prefix caching upstream
+of the trainable final block. `train/checkpoint.py` stages model files before atomic replacement.
+
+`inference.py` exports completed cached-head runs and applies fixed model/calibration/fusion
+parameters. `demo_api.py` loads one bundle and serializes prediction requests; uploads are
+stream-bounded to 25 MiB and temporary files are removed on return or failure. Its endpoints
+are `/demo/health` and `/demo/predict`, on a separate loopback service. CORS must match the
+frontend origin. It is a local research demo without authentication or deployment hardening.
+`GET /api/hybrid` and `hybrid.json` expose identical hybrid/ablation summaries grouped by
+model, optimizer, dataset and protocol. Schema migration 005 permits the joint-score fusion
+entry while preserving existing weights and calibrated contribution records.
